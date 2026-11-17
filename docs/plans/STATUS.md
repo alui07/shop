@@ -67,7 +67,7 @@ Last updated: 2026-11-16
 
 ### Open items for the owner
 
-- Commit slice 0 (see the commands in the session report), push, open a PR and confirm the CI workflow passes on GitHub: the workflows and the Testcontainers host override have never run on a GitHub runner.
+- Done 2026-11-17: slice 0 committed and pushed; the `CI` workflow passed on GitHub, which confirms the Testcontainers host override on a Linux runner.
 
 - Code scanning (Trivy SARIF upload, CodeQL) only runs on a public repo. Workflows skip those steps while the repo is private. Decide whether to make the repo public now or at slice 6.
 - Install the Renovate GitHub app on the repo once it exists on GitHub.
@@ -119,4 +119,4 @@ Requested by the owner on 2026-11-16: 100% unit coverage, integration and end-to
 
 ## Next
 
-Slice 0 and the test follow-up are committed and pushed (`6f9dbd8`). The owner checks the first `CI` run on GitHub (never yet verified from here: `gh` is not installed) and works through `tests/manual/README.md`. Then slice 1 (catalog browsing end to end): write `slice-1-brief.md` here first.
+Slice 0 and the test follow-up are committed and pushed, and the GitHub checks passed (owner confirmed 2026-11-17). The owner works through the rest of `tests/manual/README.md`. Git and GitHub operations (branches, commits, pushes, PRs) are the owner's; Claude edits the working tree only and supplies the commands.
