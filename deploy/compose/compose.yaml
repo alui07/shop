@@ -1,0 +1,80 @@
+name: shop
+
+x-host-user: &host-user "${HOST_UID:?set by make}:${HOST_GID:?set by make}"
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:?set by make}
+    environment:
+      POSTGRES_DB: shop
+      POSTGRES_USER: shop
+      POSTGRES_PASSWORD: dev-only-postgres-password
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shop -d shop"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  valkey:
+    image: ${VALKEY_IMAGE:?set by make}
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mailpit:
+    image: ${MAILPIT_IMAGE:?set by make}
+    ports:
+      - "127.0.0.1:8025:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    image: ${MAVEN_IMAGE:?set by make}
+    user: *host-user
+    working_dir: /workspace
+    entrypoint: ["mvn"]
+    command: ${MVN_ARGS:?set by make} spring-boot:run
+    environment:
+      HOME: /cache/home
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/shop
+      SPRING_DATASOURCE_USERNAME: shop
+      SPRING_DATASOURCE_PASSWORD: dev-only-postgres-password
+    volumes:
+      - ../../services/api:/workspace
+      - ../../.cache/m2:/cache/m2
+      - ../../.cache/home:/cache/home
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    image: ${WEB_TOOLS_IMAGE:?set by make}
+    pull_policy: never
+    user: *host-user
+    working_dir: /app
+    command: ["pnpm", "run", "dev"]
+    environment:
+      HOME: /cache/home
+      API_PROXY_TARGET: http://api:8080
+      pnpm_config_store_dir: /cache/pnpm
+    ports:
+      - "127.0.0.1:5173:5173"
+    volumes:
+      - ../../apps/web:/app
+      - ../../.cache/pnpm:/cache/pnpm
+      - ../../.cache/home:/cache/home
+    depends_on:
+      api:
+        condition: service_started
+
+volumes:
+  postgres-data:

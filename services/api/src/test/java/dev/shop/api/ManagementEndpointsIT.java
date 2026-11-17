@@ -1,0 +1,48 @@
+package dev.shop.api;
+
+import static dev.shop.api.support.HttpGet.get;
+import static dev.shop.api.support.HttpGet.statusOf;
+import static org.assertj.core.api.Assertions.assertThat;
+
+import dev.shop.api.support.PostgresTestConfiguration;
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalManagementPort;
+import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.context.annotation.Import;
+
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = "management.server.port=0")
+@Import(PostgresTestConfiguration.class)
+class ManagementEndpointsIT {
+
+    @LocalServerPort
+    private int serverPort;
+
+    @LocalManagementPort
+    private int managementPort;
+
+    @Test
+    void doesNotServeActuatorOnTheApplicationPort() {
+        assertThat(statusOf(serverPort, "/actuator/health")).isEqualTo(404);
+    }
+
+    @Test
+    void exposesOnlyHealthOnTheManagementPort() {
+        assertThat(statusOf(managementPort, "/actuator/health")).isEqualTo(200);
+        assertThat(statusOf(managementPort, "/actuator/env")).isEqualTo(404);
+        assertThat(statusOf(managementPort, "/actuator/info")).isEqualTo(404);
+    }
+
+    @Test
+    void discoveryPageOnTheManagementPortListsOnlyHealthLinks() {
+        var response = get(managementPort, "/actuator");
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(response.body()).contains("/actuator/health").doesNotContain("/actuator/env", "/actuator/info");
+    }
+
+    @Test
+    void unknownApiPathReturnsNotFound() {
+        assertThat(statusOf(serverPort, "/api/unknown")).isEqualTo(404);
+    }
+}

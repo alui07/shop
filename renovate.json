@@ -1,0 +1,32 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "docker:pinDigests", "helpers:pinGitHubActionDigests"],
+  "minimumReleaseAge": "7 days",
+  "packageRules": [
+    {
+      "description": "One PR for all non-major updates",
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "groupName": "non-major updates"
+    },
+    {
+      "description": "The Playwright npm package and browser image must be the same release; declared after the non-major rule so this group wins",
+      "matchPackageNames": ["@playwright/test", "mcr.microsoft.com/playwright"],
+      "groupName": "playwright"
+    },
+    {
+      "description": "MCR tags carry no release timestamp, so the 7-day gate would hold this image forever; the npm package keeps the gate",
+      "matchPackageNames": ["mcr.microsoft.com/playwright"],
+      "minimumReleaseAgeBehaviour": "timestamp-optional"
+    }
+  ],
+  "customManagers": [
+    {
+      "description": "Versions annotated with '# renovate:' in deploy/versions.mk",
+      "customType": "regex",
+      "managerFilePatterns": ["/^deploy/versions\\.mk$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n\\w+ := (?:[\\w./-]+:)?(?<currentValue>[^@\\s]+)(?:@(?<currentDigest>sha256:[a-f0-9]+))?"
+      ]
+    }
+  ]
+}
