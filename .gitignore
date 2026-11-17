@@ -1,0 +1,15 @@
+.cache/
+build/
+services/api/target/
+apps/web/node_modules/
+apps/web/dist/
+apps/web/coverage/
+tests/e2e/node_modules/
+tests/e2e/reports/
+.env
+.env.*
+!.env.example
+*.log
+.idea/
+.vscode/
+.DS_Store
