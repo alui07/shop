@@ -34,7 +34,7 @@ Last updated: 2026-11-16
 | Integrated `make ci` and `make dev` by orchestrator | done: `make ci` passes; `make dev` serves the page and `/api/status` through `localhost:5173` |
 | Fable review of the diff | approved in round 2 |
 | Opus review of the diff | approved in round 2 |
-| Owner commits | not started |
+| Owner commits | done: commit `6f9dbd8` on `main`, pushed to `origin` (includes slice 0, the test suite and the round 1 review fixes; only this file changed afterwards) |
 
 ### Changes to the brief made during implementation
 
@@ -89,8 +89,9 @@ Requested by the owner on 2026-11-16: 100% unit coverage, integration and end-to
 | Opus design challenge | done, 15 findings folded in as amendments T1 to T17 |
 | Implementation (api, web, e2e, platform agents) | done |
 | Integrated `make ci` by orchestrator | done: passes in about 72 s warm (API 3 unit + 8 integration, web 18 tests at 100%, 6 e2e scenarios) |
-| Fable review | round 1: changes requested (2 should-fix, 10 nits), fixed; round 2 in progress |
-| Opus review | round 1: changes requested (1 should-fix, 11 nits), fixed; round 2 in progress |
+| Fable review | approved in round 2 |
+| Opus review | approved in round 2 |
+| Owner commits | done: commit `6f9dbd8` on `main`, pushed to `origin` (includes slice 0, the test suite and the round 1 review fixes; only this file changed afterwards) |
 
 ### Notes from implementation
 
@@ -108,3 +109,14 @@ Requested by the owner on 2026-11-16: 100% unit coverage, integration and end-to
 - `main.test.tsx` render test passed by accident: one shared `Response` was consumed twice under StrictMode, leaving the app in the unavailable state (Fable): the mock now returns a fresh response per call and the test asserts no alert.
 - Nits fixed: e2e teardown survives a failed log capture and Ctrl-C (trap); `E2E_ARGS` for running part of the suite; tautological `toBeDefined`; timeouts in the IT HTTP helper; `ApplicationIT` asserts the exact build version; duplicate e2e assertion; e2e source mounted read-only; README wording (JUnit, `vitest run --coverage`, text report); manual checklist (revert the hot-reload edit, `make e2e-deps`, deferred TODOs removed, Renovate base-image check added); local-only path removed from `docs/plans/README.md`.
 - Not changed: the React root in `main.test.tsx` is not unmounted (harmless, Opus nit).
+
+### Test follow-up round 2 nits deferred (both reviewers approved; none blocking)
+
+- `make e2e` on Ctrl-C: the trap tears the stack down before the log line runs, so `stack.log` is emptied and `down` runs twice. Fix: `trap : INT TERM` so the normal log-then-down path runs once (both).
+- The runner command `./node_modules/.bin/playwright test` is written in both the Makefile and `tests/e2e/compose.yaml`; make it the compose entrypoint and pass only `$(E2E_ARGS)` (Fable).
+- `App.test.tsx` pending-abort test waits 50 ms of real time; fake timers would remove the wall-clock dependency (Fable).
+- Two `make e2e` runs in the same checkout collide (fixed project name `shop-e2e`, shared report folder). One run per checkout, or add `E2E_PROJECT ?= shop-e2e` (Opus).
+
+## Next
+
+Slice 0 and the test follow-up are committed and pushed (`6f9dbd8`). The owner checks the first `CI` run on GitHub (never yet verified from here: `gh` is not installed) and works through `tests/manual/README.md`. Then slice 1 (catalog browsing end to end): write `slice-1-brief.md` here first.
