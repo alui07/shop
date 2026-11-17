@@ -117,11 +117,9 @@ Requested by the owner on 2026-11-16: 100% unit coverage, integration and end-to
 - `App.test.tsx` pending-abort test waits 50 ms of real time; fake timers would remove the wall-clock dependency (Fable).
 - Two `make e2e` runs in the same checkout collide (fixed project name `shop-e2e`, shared report folder). One run per checkout, or add `E2E_PROJECT ?= shop-e2e` (Opus).
 
-## Next
+## Slice 0 wrap-up
 
 Slice 0 and the test follow-up are committed and pushed, and the GitHub checks passed (owner confirmed 2026-11-17). The owner works through the rest of `tests/manual/README.md`. Git and GitHub operations (branches, commits, pushes, PRs) are the owner's; Claude edits the working tree only and supplies the commands.
-<<<<<<< Updated upstream
-=======
 
 ## Slice 1: catalog browsing end to end (brief: `slice-1-brief.md`, branch `slice-1-catalog`)
 
@@ -137,7 +135,7 @@ Started 2026-11-17. The owner asked to run until the daily usage limit; this tab
 | Phase 2 implementation: E2E agent | done: 37 Playwright tests (catalog, pagination, product, status, outage, CSP, headers, accessibility). It found a real defect: Zod's eval probe (`new Function`) caused one CSP `script-src` violation per page load; fixed by the orchestrator with `z.config({ jitless: true })` in `apps/web/src/lib/catalogSearch.ts` |
 | Integrated `make ci` and `make dev` by orchestrator | done: `make ci` passes in about 150 s (API 43 unit + 46 integration, web 82 tests, both 100%; scans clean; 37 e2e passed with zero CSP violations). `make dev` serves the seeded catalog through `localhost:5173`; not opened in a real browser from here |
 | Review | approved by Opus in round 3 (rounds 1 and 2 requested changes, all fixed). `make ci` green: API 43 unit + 58 integration, web 88 tests, both 100%; scans clean; 37 e2e with zero CSP violations |
-| Owner commits and opens the PR | not started |
+| Owner commits and opens the PR | done: merged into `main` as PR #1 (`389f354`) on 2026-11-17 |
 
 ### How to resume slice 1
 
@@ -170,5 +168,4 @@ Started 2026-11-17. The owner asked to run until the daily usage limit; this tab
 
 ## Next
 
-Owner commits slice 1 on `slice-1-catalog`, pushes, and opens a PR into `main`; CI on GitHub runs `make ci`. Then slice 2 (deploy slice 1 to kind): write `slice-2-brief.md` here first. Before slice 3, create the repo-specific `CLAUDE.md` described in `master-plan.md` ("Repo-specific `CLAUDE.md`"): a second, security-only Opus reviewer for slices 3, 4 and 6, plus the standing agent rules. Per the global CLAUDE.md (updated 2026-11-17): Opus designs, an Opus agent challenges, Sonnet implements, one Opus agent reviews until it approves.
->>>>>>> Stashed changes
+Slice 1 is merged (PR #1). Next is slice 2 (deploy slice 1 to kind): write `slice-2-brief.md` here first. Before slice 3, create the repo-specific `CLAUDE.md` described in `master-plan.md` ("Repo-specific `CLAUDE.md`"): a second, security-only Opus reviewer for slices 3, 4 and 6, plus the standing agent rules. Per the global CLAUDE.md (updated 2026-11-17): Opus designs, an Opus agent challenges, Sonnet implements, one Opus agent reviews until it approves.

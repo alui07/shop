@@ -4,6 +4,7 @@ services/api/target/
 apps/web/node_modules/
 apps/web/dist/
 apps/web/coverage/
+apps/web/.tanstack/
 tests/e2e/node_modules/
 tests/e2e/reports/
 .env

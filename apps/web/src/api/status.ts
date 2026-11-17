@@ -1,18 +1,19 @@
+import { apiClient } from './client';
+
 export interface ApiStatus {
   status: string;
   version: string;
 }
 
 export async function fetchStatus(signal?: AbortSignal): Promise<ApiStatus> {
-  const response = await fetch('/api/status', { signal: signal ?? null });
+  const { data, response } = await apiClient.GET('/api/status', { signal });
   if (!response.ok) {
     throw new Error(`GET /api/status failed with ${response.status}`);
   }
-  const body: unknown = await response.json();
-  if (!isApiStatus(body)) {
+  if (!isApiStatus(data)) {
     throw new Error('GET /api/status returned an unexpected payload');
   }
-  return body;
+  return data;
 }
 
 function isApiStatus(value: unknown): value is ApiStatus {

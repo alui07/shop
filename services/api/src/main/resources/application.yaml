@@ -5,13 +5,35 @@ spring:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/shop}
     username: ${SPRING_DATASOURCE_USERNAME:shop}
     password: ${SPRING_DATASOURCE_PASSWORD:}
+  flyway:
+    ignore-migration-patterns: "*:future,repeatable:missing"
 
 server:
   port: 8080
+  shutdown: graceful
+
+springdoc:
+  api-docs:
+    enabled: false
+  writer-with-order-by-keys: true
 
 management:
   server:
     port: 8081
+  tracing:
+    sampling:
+      probability: 1.0
+    export:
+      otlp:
+        enabled: false
+  otlp:
+    metrics:
+      export:
+        enabled: false
+  logging:
+    export:
+      otlp:
+        enabled: false
   endpoints:
     access:
       default: none
@@ -28,3 +50,30 @@ management:
           include: livenessState
         readiness:
           include: readinessState,db
+
+---
+spring:
+  config:
+    activate:
+      on-profile: "!dev"
+logging:
+  structured:
+    format:
+      console: ecs
+
+---
+spring:
+  config:
+    activate:
+      on-profile: dev
+springdoc:
+  api-docs:
+    enabled: true
+
+---
+spring:
+  config:
+    activate:
+      on-profile: seed
+  flyway:
+    locations: classpath:db/migration,classpath:db/seed
