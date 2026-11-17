@@ -77,10 +77,20 @@ Each slice ends runnable and demonstrable.
 
 ## Process per slice (global instructions)
 
-1. Fable writes the implementation brief; a separate Opus agent challenges it.
+1. Opus writes the implementation brief; a separate Opus agent challenges it.
 2. Sonnet agents implement, in parallel where files do not overlap (api, web, deploy and docs).
-3. Fable and Opus review the diff independently as fresh agents; fix and resubmit until both approve.
-4. Report what each reviewer raised and how it was resolved. The owner runs all git commands.
+3. One Opus agent reviews the diff as a fresh agent; fix and resubmit until it approves.
+4. Report what the reviewer raised and how it was resolved. The owner runs all git commands.
+
+Slices 0 and 1 used two reviewers (Fable and Opus). Updated on 2026-11-17 to match the owner's global instructions.
+
+### Repo-specific `CLAUDE.md` (to create before slice 3)
+
+The global instructions keep one reviewer. This repo adds a rule of its own, in a `CLAUDE.md` at the repo root, written and committed before slice 3 starts:
+
+- For security-sensitive slices (3: auth, sessions, CSRF, roles; 4: checkout, stock reservation, idempotency, payment webhooks; 6: supply chain, signing, GitOps), a second Opus reviewer runs alongside the first with a security-only brief: authentication and session handling, authorisation on every endpoint, input abuse, concurrency and replay, secrets, and what an attacker can reach. It reviews the same diff independently; both must approve.
+- Why: in slices 0 and 1, two reviewers with different perspectives each found real defects the other missed (for example the NUL-byte 500 and a test that passed by accident), while identical reviewers would mostly duplicate each other. A second reviewer with a different focus keeps that benefit where a missed defect costs most.
+- The same file can also carry the repo's standing rules that agents keep needing in their prompts: run everything through the Makefile, `sg docker` when the shell lacks the group, no git commands except read-only `git status` and `git diff`, the pnpm 7-day release-age gate, the 100% coverage gates and that only the owner approves exclusions, and `docs/plans/STATUS.md` as the resume point.
 
 Briefs will state the traps the challenger flagged: Jackson 3 package names, no `RestTemplate`, no Bitnami, Testcontainers 2 package renames, Vite 8 plugin compatibility. Versions are checked against official docs at the start of each slice.
 
