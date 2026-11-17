@@ -26,13 +26,17 @@ AS_HOST := --user $(HOST_UID):$(HOST_GID) -e HOME=/cache/home -v $(CACHE_DIR)/ho
 
 MVN_DOCKER := docker run --rm $(AS_HOST) -v $(CURDIR)/services/api:/workspace -v $(CACHE_DIR)/m2:/cache/m2 -w /workspace --entrypoint mvn
 MVN_ARGS := -B -ntp -Dmaven.repo.local=/cache/m2/repository
+# Testcontainers needs the Docker socket; shared by every target that runs the integration tests.
+MVN_IT_DOCKER = -v /var/run/docker.sock:/var/run/docker.sock --group-add $(or $(DOCKER_SOCK_GID),$(error could not read the Docker socket GID; is Docker reachable?)) \
+	--add-host=host.docker.internal:host-gateway -e TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal -e POSTGRES_IMAGE
 
 export HOST_UID HOST_GID MAVEN_IMAGE POSTGRES_IMAGE VALKEY_IMAGE MAILPIT_IMAGE NGINX_IMAGE PLAYWRIGHT_IMAGE API_IMAGE WEB_IMAGE WEB_TOOLS_IMAGE MVN_ARGS
 
-# Node tooling for a project directory. Nothing in tests/e2e needs a browser, so it shares the web tools image.
-NODE_RUN = docker run --rm $(AS_HOST) -e pnpm_config_store_dir=/cache/pnpm \
+# Node tooling for a project directory ($(1)), with optional extra docker flags ($(2)). Nothing in tests/e2e needs a browser, so it shares the web tools image.
+NODE_RUN = docker run --rm $(AS_HOST) -e pnpm_config_store_dir=/cache/pnpm $(2) \
 	-v $(CURDIR)/$(1):/app -v $(CACHE_DIR)/pnpm:/cache/pnpm -w /app $(WEB_TOOLS_IMAGE)
-WEB_RUN = $(call NODE_RUN,apps/web)
+# The API's committed OpenAPI document is mounted read-only; the generate scripts read it from OPENAPI_SPEC.
+WEB_RUN = $(call NODE_RUN,apps/web,-v $(CURDIR)/services/api/openapi:/spec:ro -e OPENAPI_SPEC=/spec/openapi.json)
 E2E_RUN = $(call NODE_RUN,tests/e2e)
 
 # Trivy resolves pom.xml dependencies from $$HOME/.m2/repository; without the mount it hits Maven Central and gets rate limited.
@@ -51,7 +55,7 @@ $(TRIVY) convert --scanners vuln,secret,misconfig --format table --severity HIGH
 endef
 
 .PHONY: help dev down logs lint test build scan ci fmt clean renovate-validate cache-dirs \
-	api-lint api-test api-build api-stop api-start web-tools web-deps web-lint web-test web-build \
+	api-lint api-test api-spec api-build api-stop api-start web-tools web-deps web-lint web-test web-build web-api-client generate \
 	e2e e2e-deps e2e-lint e2e-version-lock docker-lint workflow-lint compose-lint scan-fs scan-api scan-web
 
 help: ## Show this help
@@ -85,7 +89,7 @@ build: api-build web-build ## Build the runtime images shop/api:dev and shop/web
 
 scan: scan-fs scan-api scan-web ## Trivy scans (repo, API image, web image); fails on fixable HIGH/CRITICAL
 
-e2e: build e2e-deps ## Browser tests against the built images; one spec: make e2e E2E_ARGS=specs/home.spec.ts
+e2e: build e2e-deps ## Browser tests against the built images; one spec: make e2e E2E_ARGS=specs/catalog.spec.ts
 	trap '$(E2E_DOWN)' INT TERM; \
 	$(E2E_COMPOSE) up -d --wait --wait-timeout 120 && { $(E2E_COMPOSE) --profile runner run --rm -T e2e ./node_modules/.bin/playwright test $(E2E_ARGS); s=$$?; } || s=$$?; \
 	$(E2E_COMPOSE) logs --no-color > build/reports/e2e/stack.log 2>&1 || true; \
@@ -112,8 +116,11 @@ api-lint: cache-dirs
 	$(MVN_DOCKER) $(MAVEN_IMAGE) $(MVN_ARGS) spotless:check
 
 api-test: cache-dirs
-	$(MVN_DOCKER) -v /var/run/docker.sock:/var/run/docker.sock --group-add $(or $(DOCKER_SOCK_GID),$(error could not read the Docker socket GID; is Docker reachable?)) \
-		--add-host=host.docker.internal:host-gateway -e TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal -e POSTGRES_IMAGE $(MAVEN_IMAGE) $(MVN_ARGS) verify
+	$(MVN_DOCKER) $(MVN_IT_DOCKER) $(MAVEN_IMAGE) $(MVN_ARGS) verify
+
+api-spec: cache-dirs ## Rewrite services/api/openapi/openapi.json from the running code (runs only OpenApiContractIT)
+	$(MVN_DOCKER) $(MVN_IT_DOCKER) -e UPDATE_OPENAPI=true $(MAVEN_IMAGE) $(MVN_ARGS) \
+		-Dit.test=OpenApiContractIT -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true verify
 
 api-build:
 	docker build --build-arg MAVEN_IMAGE=$(MAVEN_IMAGE) --build-arg JRE_IMAGE=$(JRE_IMAGE) -t $(API_IMAGE) services/api
@@ -129,6 +136,16 @@ web-lint: web-deps
 	$(WEB_RUN) pnpm run lint
 	$(WEB_RUN) pnpm run typecheck
 	$(WEB_RUN) pnpm run format:check
+	$(WEB_RUN) pnpm run generate:api:check
+	$(WEB_RUN) pnpm run generate:routes:check
+
+web-api-client: web-deps ## Regenerate apps/web/src/api/schema.d.ts from the committed OpenAPI document
+	$(WEB_RUN) pnpm run generate:api
+
+generate: ## Regenerate the OpenAPI document, the web API client and the route tree, in that order
+	$(MAKE) api-spec
+	$(MAKE) web-api-client
+	$(WEB_RUN) pnpm run generate:routes
 
 web-test: web-deps
 	$(WEB_RUN) pnpm run test

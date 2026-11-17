@@ -8,10 +8,10 @@ Unit and integration tests are not here. They stay next to the code they test, w
 
 | Kind | Location | Tool | What it proves | Command |
 |---|---|---|---|---|
-| API unit | `services/api/src/test/java`, classes named `*Test` | JUnit, Mockito, Spring slice tests (Surefire) | Controllers and `main` behave correctly in isolation, without a database | `make api-test` |
-| API integration | `services/api/src/test/java`, classes named `*IT` | Spring Boot test, Testcontainers Postgres (Failsafe) | The real application starts against a real Postgres, Flyway migrates, `/api/status` answers, only health is exposed on the management port, readiness turns 503 when the database stops while liveness stays 200 | `make api-test` |
-| Web unit and component | `apps/web/src`, files named `*.test.ts(x)` | Vitest, Testing Library, jsdom | The status client and the React app render the loading, healthy and unavailable states and retry correctly | `make web-test` |
-| End-to-end | `tests/e2e/specs` | Playwright (Chromium), axe-core | The built images work together in a real browser: home page shows status and version, deep links fall back to the app, the app recovers after an API outage, no WCAG A/AA axe violations, `/api/status` returns JSON | `make e2e` |
+| API unit | `services/api/src/test/java`, classes named `*Test` | JUnit, Mockito, Spring slice tests (Surefire) | Controllers and `main` behave correctly in isolation, without a database; Spring Modulith module boundaries hold (`ModularityTest`) | `make api-test` |
+| API integration | `services/api/src/test/java`, classes named `*IT` | Spring Boot test, Testcontainers Postgres (Failsafe) | The real application starts against a real Postgres, Flyway migrates, catalog queries (search, ranking, filter, sorts, paging, hidden inactive products) and the HTTP contract, the committed OpenAPI document matches the code (`OpenApiContractIT`), request logs carry the trace id from `traceparent`, `/api/status` answers, only health is exposed on the management port, readiness turns 503 when the database stops while liveness stays 200 | `make api-test` |
+| Web unit and component | `apps/web/src`, files named `*.test.ts(x)` | Vitest, Testing Library, jsdom | Catalog rendering, search, category filter, sort, pagination and URL sync, search-param fallbacks, loading, empty and error states with retry, product page and not found, price formatting, and the status view | `make web-test` |
+| End-to-end | `tests/e2e/specs` | Playwright (Chromium), axe-core | The built images work together in a real browser: the catalog flow (search, filter, sort, paging, deep links, product page, not found), `/status` shows API status and recovers after a simulated outage, the Content Security Policy has no violations and the security headers are present, no WCAG A/AA axe violations on the main pages | `make e2e` |
 | Manual | `tests/manual/README.md` | A person | Things that need a human, a GitHub runner or another machine | See the checklist |
 
 `make test` runs both API kinds and the web tests. `make ci` runs `lint test build scan e2e`, which is what the pull request workflow runs.
@@ -20,7 +20,8 @@ Unit and integration tests are not here. They stay next to the code they test, w
 
 - The API must have 100% line and branch coverage, the web app 100% of lines, branches, functions and statements.
 - Coverage is measured over unit and integration tests together and enforced by the build: JaCoCo `check` fails `mvn verify`, Vitest `thresholds` fail `vitest run --coverage`. A drop below 100% fails `make test`.
-- Production code is never excluded from measurement. `ApiApplication.main` is covered by a unit test that mocks `SpringApplication.run` statically; `main.tsx` is covered by tests that render into `#root`.
+- Exactly two exclusions exist, both in the web app, approved by the owner on 2026-11-17: the machine-generated `src/routeTree.gen.ts` and the unmodified vendored shadcn primitives in `src/components/ui/`. Any other exclusion needs the owner's approval. If a primitive is edited it moves under the gate (`docs/adr/0002-testing-strategy.md`). The API has none.
+- All other production code is measured. `ApiApplication.main` is covered by a unit test that mocks `SpringApplication.run` statically; `main.tsx` is covered by tests that render into `#root`.
 - End-to-end tests are not measured.
 
 Reports:
@@ -41,7 +42,7 @@ All of these are gitignored.
 `make e2e` first builds the runtime images `shop/api:dev` and `shop/web:dev`, because those are the artefacts that ship, then installs the e2e dependencies. It then starts a separate Compose project, `shop-e2e` (`tests/e2e/compose.yaml`), with:
 
 - `postgres`: Postgres with its data on tmpfs, thrown away after each run.
-- `api` and `web`: the built images.
+- `api` and `web`: the built images. The API runs with the `seed` profile so the catalog has data.
 - `gateway`: a plain nginx using `tests/e2e/gateway.conf`. It sends `/api/` to the API and everything else to the web container. The web image deliberately does not proxy `/api`; in production the Gateway added in slice 2 will do that. This test gateway only stands in for it and is used nowhere else.
 - `e2e`: the Playwright runner, in the Playwright image from `deploy/versions.mk`. It reaches the stack at `http://gateway:8080`. Nothing is published to the host.
 
@@ -58,7 +59,7 @@ The API outage test is simulated in the browser: `page.route` aborts requests to
 3. Read `build/reports/e2e/stack.log` for the logs of Postgres, API, web and gateway. It is written after every run, passing or failing. A failure at startup (`up --wait` timed out) shows up here too.
 4. In CI, the same folder is uploaded as the `e2e-reports` artifact when the job fails and kept for 7 days.
 
-To run part of the suite, pass Playwright arguments through `E2E_ARGS`: `make e2e E2E_ARGS=specs/home.spec.ts` for one file, or `make e2e E2E_ARGS="-g outage"` for tests whose title matches.
+To run part of the suite, pass Playwright arguments through `E2E_ARGS`: `make e2e E2E_ARGS=specs/catalog.spec.ts` for one file, or `make e2e E2E_ARGS="-g outage"` for tests whose title matches.
 
 ## Manual checks
 

@@ -9,6 +9,16 @@
       "groupName": "non-major updates"
     },
     {
+      "description": "springdoc updates can change the generated OpenAPI document and need make generate; declared after the non-major rule so this group wins",
+      "matchPackageNames": ["org.springdoc:*"],
+      "groupName": "springdoc"
+    },
+    {
+      "description": "TanStack Router packages must move together; declared after the non-major rule so this group wins",
+      "matchPackageNames": ["@tanstack/react-router", "@tanstack/router-*"],
+      "groupName": "tanstack router"
+    },
+    {
       "description": "The Playwright npm package and browser image must be the same release; declared after the non-major rule so this group wins",
       "matchPackageNames": ["@playwright/test", "mcr.microsoft.com/playwright"],
       "groupName": "playwright"

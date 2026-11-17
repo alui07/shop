@@ -120,3 +120,52 @@ Requested by the owner on 2026-11-16: 100% unit coverage, integration and end-to
 ## Next
 
 Slice 0 and the test follow-up are committed and pushed, and the GitHub checks passed (owner confirmed 2026-11-17). The owner works through the rest of `tests/manual/README.md`. Git and GitHub operations (branches, commits, pushes, PRs) are the owner's; Claude edits the working tree only and supplies the commands.
+
+## Slice 1: catalog browsing end to end (brief: `slice-1-brief.md`, branch `slice-1-catalog`)
+
+Started 2026-11-17. The owner asked to run until the daily usage limit; this table is updated at every step so a new session can continue from the first row that is not done.
+
+| Step | State |
+|---|---|
+| Brief written | done |
+| Opus design challenge | done, 27 findings |
+| Amendments folded into the brief | done (S1 to S25); owner approved the two coverage exclusions (route tree, shadcn `components/ui`) and wants to be asked before any other |
+| Phase 1 implementation: API, WEB, PLATFORM agents in parallel | done. API verified inline by the orchestrator at the owner's request after the API agent was stopped: `make api-lint`, `make api-test` (43 unit, 46 integration, 100% line and branch), `make api-build`, `make api-spec` (spec unchanged, structurally matches the contract), and runtime checks of the built image with profile `seed` (endpoints, sorts, paging, 400 and 404, `nosniff`, `Cache-Control: no-cache`, JSON logs with `traceId` from `traceparent`, no warnings or export errors after 65 s idle, `/v3/api-docs` 404, uid 10001) |
+| Integration: `make generate` (generated files unchanged), `make lint test build` | done, all pass (API 43 unit + 46 integration, web 82 tests, both at 100%) |
+| Phase 2 implementation: E2E agent | done: 37 Playwright tests (catalog, pagination, product, status, outage, CSP, headers, accessibility). It found a real defect: Zod's eval probe (`new Function`) caused one CSP `script-src` violation per page load; fixed by the orchestrator with `z.config({ jitless: true })` in `apps/web/src/lib/catalogSearch.ts` |
+| Integrated `make ci` and `make dev` by orchestrator | done: `make ci` passes in about 150 s (API 43 unit + 46 integration, web 82 tests, both 100%; scans clean; 37 e2e passed with zero CSP violations). `make dev` serves the seeded catalog through `localhost:5173`; not opened in a real browser from here |
+| Review | approved by Opus in round 3 (rounds 1 and 2 requested changes, all fixed). `make ci` green: API 43 unit + 58 integration, web 88 tests, both 100%; scans clean; 37 e2e with zero CSP violations |
+| Owner commits and opens the PR | not started |
+
+### How to resume slice 1
+
+1. Read `slice-1-brief.md` (amendments at the end override the body) and this table.
+2. `git status` and `git diff --stat main` show what exists. Compare with the brief's work split to see which agent's part is missing or half done.
+3. Run `make lint` and `make test` to see what currently passes, then continue from the first unfinished row.
+4. Agents must not run git commands other than read-only `git status` and `git diff` (an API agent tried `git rm --cached` on 2026-11-17; it had no effect, nothing was staged). Say so in every agent prompt.
+
+### Slice 1 review round 1: findings and resolutions
+
+- NUL byte in `q`, `category` or the slug reached Postgres and gave a 500 (Fable, should-fix): control characters rejected with `@Pattern` on all three, `@Size(max = 100)` added to `category` and the slug, integration tests for each.
+- Deleted `specs/home.spec.ts` still named in the Makefile help, README, tests/README.md and the manual checklist (Opus, should-fix): now `specs/catalog.spec.ts`.
+- Manual keyboard and browser checks described the old home page (Opus, should-fix): rewritten for the catalog, product page and `/status`.
+- Nits fixed: sort select shows "Name" for an unsearched list (both); e2e prices found by `data-testid` with a non-empty check (Fable); seed upsert updates `currency` (Fable); ADR 0003 notes the `ProblemDetail` exception to required properties, that openapi-typescript and TanStack Router updates also need `make generate`, and the count/page snapshot caveat for slice 3 (both); `ModularityTest` moved to the unit row in tests/README.md (Opus); unused `lucide-react` and the `shadcn` CLI removed from dependencies (Opus); `.tanstack/` ignored (Opus); `make generate` runs its steps in sequence (Opus); CSP collector waits for the page to settle before asserting (Opus); `check-routes.sh` always restores the committed tree (Opus).
+- Not changed: an unknown `category` slug in the URL shows "All categories" in the select while results say "No products match" (Opus nit, deferred to slice 1 polish or later).
+
+### Slice 1 review round 2 (Opus): findings and resolutions
+
+- Malformed percent-encoding in a query parameter (`q=%FF`) gave a 500 and an ERROR stack trace (should-fix): `InvalidParameterException` now maps to a 400 Problem Details, logged at debug; tests for `q=%FF`, `q=%ED%A0%80`, `category=%FF`.
+- The OpenAPI `pattern` `\p{Cntrl}` was Java-only (should-fix): now `^[^\x00-\x1F\x7F]*$`, valid in Java, ECMA-262 and Python; spec regenerated.
+- The slug control-character test could not fail because Tomcat rejected `%00` first (should-fix): now `oak%0Adesk` and `%7F`, asserting `application/problem+json`.
+- Nits fixed: 200 cases for `brass lamp` and `café`; the web app drops control characters and over-long categories from URL params, and an API 400 on a product slug shows "Product not found"; ADR 0002 documents the pinned shadcn CLI command and the `lucide-react` caveat; ADR 0003 notes that Tomcat-rejected requests get Tomcat's HTML 400 page.
+
+### Slice 1 round 3 nits deferred (Opus approved; none blocking)
+
+- `ApiExceptionHandler` says "not valid UTF-8" for every `InvalidParameterException`, which Tomcat also throws for empty parameter names, bad hex and the parameter-count limit; use a neutral detail such as "A request parameter could not be parsed" and add `=x` and `q=%G1` to the bad-request test.
+- `ApiExceptionHandler` imports a Tomcat class; note in ADR 0003 that switching servlet containers means revisiting it.
+- `hasNoControlCharacters` in `apps/web/src/lib/catalogSearch.ts` can iterate UTF-16 units directly; add a test that U+0085, U+00A0 and an emoji are accepted.
+- From round 1: an unknown `category` slug in the URL shows "All categories" in the select.
+
+## Next
+
+Owner commits slice 1 on `slice-1-catalog`, pushes, and opens a PR into `main`; CI on GitHub runs `make ci`. Then slice 2 (deploy slice 1 to kind): write `slice-2-brief.md` here first. Per the global CLAUDE.md (updated 2026-11-17): Opus designs, an Opus agent challenges, Sonnet implements, an Opus agent reviews until it approves.

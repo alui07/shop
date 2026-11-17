@@ -6,6 +6,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.Map;
 
 public final class HttpGet {
 
@@ -15,9 +16,14 @@ public final class HttpGet {
     private HttpGet() {}
 
     public static HttpResponse<String> get(int port, String path) {
-        HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
-                .timeout(Duration.ofSeconds(10))
-                .build();
+        return get(port, path, Map.of());
+    }
+
+    public static HttpResponse<String> get(int port, String path, Map<String, String> headers) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+                .timeout(Duration.ofSeconds(10));
+        headers.forEach(builder::header);
+        HttpRequest request = builder.build();
         try {
             return CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
         } catch (IOException e) {

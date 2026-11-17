@@ -19,6 +19,7 @@ services:
     image: ${API_IMAGE:?set by make}
     pull_policy: never
     environment:
+      SPRING_PROFILES_ACTIVE: seed
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/shop
       SPRING_DATASOURCE_USERNAME: shop
       SPRING_DATASOURCE_PASSWORD: dev-only-postgres-password
