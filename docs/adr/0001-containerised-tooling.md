@@ -20,7 +20,7 @@ The host has only `make` and Docker. Local runs and CI should behave the same, a
 
 **pnpm is installed with `npm install -g`.** Node 26 no longer ships corepack. This bootstrap step is outside pnpm's own `minimumReleaseAge` control; the pnpm version is pinned and Renovate-managed instead.
 
-**Two exceptions to strict pinning.** The web runtime image runs `apk upgrade --no-cache` because the digest-pinned nginx base carried fixable HIGH CVEs (musl, zlib) that fail the scan gate; this makes that image depend on the build date until a fixed base is pinned, when the line should be removed. In `apps/web`, `typescript-eslint` does not yet support TypeScript 7, so `typescript` is aliased to `@typescript/typescript6` for ESLint while `tsc` comes from the `typescript7` alias (TypeScript 7). Renovate PRs touching either alias need a manual check until the alias is dropped.
+**Two exceptions to strict pinning.** The web runtime image runs `apk upgrade --no-cache` because the digest-pinned nginx base carried fixable HIGH CVEs (musl, zlib) that fail the scan gate; this makes that image depend on the build date until a fixed base is pinned, when the line should be removed. In `apps/web`, `typescript-eslint` does not yet support TypeScript 7, so `typescript` is aliased to `@typescript/typescript6` for ESLint while `tsc` comes from the `typescript7` alias (TypeScript 7). `openapi-typescript` (slice 1) also uses the TypeScript JS API and resolves the TypeScript 6 alias; that is expected. Renovate PRs touching either alias need a manual check until the alias is dropped.
 
 ## Consequences
 

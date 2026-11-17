@@ -2,6 +2,7 @@ package dev.shop.api.status;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.info.BuildProperties;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -16,7 +17,7 @@ class StatusController {
         this.buildProperties = buildProperties;
     }
 
-    @GetMapping("/api/status")
+    @GetMapping(path = "/api/status", produces = MediaType.APPLICATION_JSON_VALUE)
     StatusResponse status() {
         String version = buildProperties.stream()
                 .map(BuildProperties::getVersion)

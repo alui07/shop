@@ -45,6 +45,7 @@ services:
     command: ${MVN_ARGS:?set by make} spring-boot:run
     environment:
       HOME: /cache/home
+      SPRING_PROFILES_ACTIVE: dev,seed
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/shop
       SPRING_DATASOURCE_USERNAME: shop
       SPRING_DATASOURCE_PASSWORD: dev-only-postgres-password

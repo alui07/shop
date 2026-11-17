@@ -4,15 +4,12 @@ import static dev.shop.api.support.HttpGet.get;
 import static dev.shop.api.support.HttpGet.statusOf;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import dev.shop.api.support.PostgresTestConfiguration;
+import dev.shop.api.support.IntegrationTest;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalManagementPort;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.context.annotation.Import;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = "management.server.port=0")
-@Import(PostgresTestConfiguration.class)
+@IntegrationTest
 class ManagementEndpointsIT {
 
     @LocalServerPort
