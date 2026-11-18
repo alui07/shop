@@ -66,6 +66,47 @@ class ProductRepository {
                 .optional();
     }
 
+    List<AdminProduct> findAllPage(String filter, int page, int size) {
+        Map<String, Object> parameters = nameOrSlugParameters(filter);
+        parameters.put("limit", size);
+        parameters.put("offset", (long) page * size);
+        return jdbc.sql("""
+                        SELECT p.id, p.slug, p.name, p.description, p.price_minor, p.currency, p.active,
+                               c.slug AS category_slug, c.name AS category_name
+                        FROM product p JOIN category c ON c.id = p.category_id
+                        WHERE :filter::text IS NULL OR position(lower(:filter) in lower(p.name)) > 0
+                              OR position(lower(:filter) in p.slug) > 0
+                        ORDER BY lower(p.name), p.id LIMIT :limit OFFSET :offset
+                        """)
+                .params(parameters)
+                .query((rs, rowNum) -> new AdminProduct(
+                        rs.getLong("id"),
+                        rs.getString("slug"),
+                        rs.getString("name"),
+                        rs.getString("description"),
+                        mapPrice(rs),
+                        mapCategory(rs),
+                        rs.getBoolean("active")))
+                .list();
+    }
+
+    long countAll(String filter) {
+        return jdbc.sql("""
+                        SELECT count(*) FROM product p
+                        WHERE :filter::text IS NULL OR position(lower(:filter) in lower(p.name)) > 0
+                              OR position(lower(:filter) in p.slug) > 0
+                        """)
+                .params(nameOrSlugParameters(filter))
+                .query(Long.class)
+                .single();
+    }
+
+    private static Map<String, Object> nameOrSlugParameters(String filter) {
+        Map<String, Object> parameters = new HashMap<>();
+        parameters.put("filter", filter);
+        return parameters;
+    }
+
     private static String filters(ProductSearch search) {
         return ACTIVE_PRODUCTS + (search.hasText() ? TEXT_FILTER : "") + (search.hasCategory() ? CATEGORY_FILTER : "");
     }

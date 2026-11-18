@@ -1,20 +1,35 @@
-import { test as base } from '@playwright/test';
+import { test as base, type APIRequest, type APIRequestContext } from '@playwright/test';
 
 export { expect } from '@playwright/test';
 
 export const frontDoorOrigin = 'http://localhost:8088';
-const frontDoorHost = new URL(frontDoorOrigin).host;
+export const idpOrigin = 'http://localhost:8089';
+export const issuer = `${idpOrigin}/realms/shop`;
 const upstream = process.env.E2E_UPSTREAM ?? '';
+const idpUpstream = process.env.E2E_IDP_UPSTREAM ?? '';
 
-// The browser reaches the front door as http://localhost:8088 through a Chromium host mapping.
-// The Node-side request context does not use Chromium's resolver, so it connects to the upstream
-// directly and sends the same Host header.
-export const test = base.extend({
+// The browser reaches the front door as http://localhost:8088 and the identity provider as
+// http://localhost:8089 through Chromium host mappings. The Node-side request contexts do not use
+// Chromium's resolver, so they connect to the upstream directly and send the same Host header.
+function upstreamContext(
+  factory: APIRequest,
+  upstreamHostPort: string,
+  origin: string,
+): Promise<APIRequestContext> {
+  return factory.newContext({
+    baseURL: `http://${upstreamHostPort}`,
+    extraHTTPHeaders: { Host: new URL(origin).host },
+  });
+}
+
+export const test = base.extend<{ idpRequest: APIRequestContext }>({
   request: async ({ playwright }, use) => {
-    const context = await playwright.request.newContext({
-      baseURL: `http://${upstream}`,
-      extraHTTPHeaders: { Host: frontDoorHost },
-    });
+    const context = await upstreamContext(playwright.request, upstream, frontDoorOrigin);
+    await use(context);
+    await context.dispose();
+  },
+  idpRequest: async ({ playwright }, use) => {
+    const context = await upstreamContext(playwright.request, idpUpstream, idpOrigin);
     await use(context);
     await context.dispose();
   },

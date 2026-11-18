@@ -20,14 +20,14 @@ class ManagementEndpointsIT {
 
     @Test
     void doesNotServeActuatorOnTheApplicationPort() {
-        assertThat(statusOf(serverPort, "/actuator/health")).isEqualTo(404);
+        assertThat(statusOf(serverPort, "/actuator/health")).isEqualTo(401);
     }
 
     @Test
     void exposesOnlyHealthOnTheManagementPort() {
         assertThat(statusOf(managementPort, "/actuator/health")).isEqualTo(200);
-        assertThat(statusOf(managementPort, "/actuator/env")).isEqualTo(404);
-        assertThat(statusOf(managementPort, "/actuator/info")).isEqualTo(404);
+        assertThat(statusOf(managementPort, "/actuator/env")).isEqualTo(401);
+        assertThat(statusOf(managementPort, "/actuator/info")).isEqualTo(401);
     }
 
     @Test
@@ -39,7 +39,7 @@ class ManagementEndpointsIT {
     }
 
     @Test
-    void unknownApiPathReturnsNotFound() {
-        assertThat(statusOf(serverPort, "/api/unknown")).isEqualTo(404);
+    void unknownApiPathIsDeniedByDefault() {
+        assertThat(statusOf(serverPort, "/api/unknown")).isEqualTo(401);
     }
 }

@@ -8,16 +8,20 @@ SHELL := bash
 HOST_UID := $(shell id -u)
 HOST_GID := $(shell id -g)
 
-COMPOSE := docker compose -f deploy/compose/compose.yaml
-E2E_COMPOSE := docker compose -p shop-e2e -f tests/e2e/compose.yaml
+CACHE_DIR := $(CURDIR)/.cache
+SECRETS_DIR := $(CACHE_DIR)/secrets
+SECRETS_FILE := $(SECRETS_DIR)/shop.env
+SECRET_KEYS := SHOP_AUTH_CLIENT_SECRET VALKEY_PASSWORD KEYCLOAK_DB_PASSWORD KC_BOOTSTRAP_ADMIN_PASSWORD SHOP_TEST_CUSTOMER_PASSWORD SHOP_TEST_ADMIN_PASSWORD
+COMPOSE := docker compose --env-file $(SECRETS_FILE) -f deploy/compose/compose.yaml
+E2E_COMPOSE := docker compose --env-file $(SECRETS_FILE) -p shop-e2e -f tests/e2e/compose.yaml
 E2E_DOWN := $(E2E_COMPOSE) --profile runner down --volumes --remove-orphans
 E2E_ARGS ?=
-CACHE_DIR := $(CURDIR)/.cache
 REPORT_DIR := build/reports/trivy
 IMAGE_DIR := build/images
 WEB_TOOLS_IMAGE := shop/web-tools:dev
 API_IMAGE := shop/api:dev
 WEB_IMAGE := shop/web:dev
+KEYCLOAK_DEV_IMAGE := shop/keycloak:dev
 K8S_TOOLS_IMAGE := shop/k8s-tools:dev
 CLUSTER_NAME := shop
 CLUSTER_PORT := 8088
@@ -37,9 +41,10 @@ MVN_DOCKER := docker run --rm $(AS_HOST) -v $(CURDIR)/services/api:/workspace -v
 MVN_ARGS := -B -ntp -Dmaven.repo.local=/cache/m2/repository
 # Testcontainers needs the Docker socket; shared by every target that runs the integration tests.
 MVN_IT_DOCKER = -v /var/run/docker.sock:/var/run/docker.sock --group-add $(or $(DOCKER_SOCK_GID),$(error could not read the Docker socket GID; is Docker reachable?)) \
-	--add-host=host.docker.internal:host-gateway -e TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal -e POSTGRES_IMAGE
+	--add-host=host.docker.internal:host-gateway -e TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal -e POSTGRES_IMAGE -e VALKEY_IMAGE
 
 export HOST_UID HOST_GID MAVEN_IMAGE POSTGRES_IMAGE VALKEY_IMAGE MAILPIT_IMAGE NGINX_IMAGE PLAYWRIGHT_IMAGE API_IMAGE WEB_IMAGE WEB_TOOLS_IMAGE MVN_ARGS \
+	KEYCLOAK_IMAGE KEYCLOAK_DEV_IMAGE \
 	K8S_TOOLS_IMAGE KUBECTL_IMAGE KUBECONFORM_IMAGE GOLANG_IMAGE DOCKER_CLI_IMAGE KIND_NODE_IMAGE
 
 KUBECONFORM_ARGS = -strict -summary -kubernetes-version $(K8S_VERSION) -cache /cache \
@@ -82,15 +87,15 @@ TRIVY := docker run --rm $(AS_HOST) -e TRIVY_CACHE_DIR=/cache/trivy -v $(CACHE_D
 
 # Scans once to JSON without failing, converts to SARIF, then gates on the same JSON.
 # `trivy convert` has no --ignore-unfixed, so it is applied at scan time and also affects the SARIF.
-# $(1) trivy subcommand and target, $(2) report name, $(3) optional cleanup once the scan has read its input
+# $(1) trivy subcommand and target, $(2) report name, $(3) optional cleanup once the scan has read its input, $(4) severities that fail the gate (default HIGH,CRITICAL)
 define trivy_report
 $(TRIVY) $(1) --quiet --scanners vuln,secret,misconfig --ignore-unfixed --format json --exit-code 0 --output /build/reports/trivy/$(2).json
 $(3)
 $(TRIVY) convert --quiet --format sarif --output /build/reports/trivy/$(2).sarif /build/reports/trivy/$(2).json
-$(TRIVY) convert --scanners vuln,secret,misconfig --format table --severity HIGH,CRITICAL --exit-code 1 /build/reports/trivy/$(2).json
+$(TRIVY) convert --scanners vuln,secret,misconfig --format table --severity $(or $(4),HIGH,CRITICAL) --exit-code 1 /build/reports/trivy/$(2).json
 endef
 
-.PHONY: help dev down logs lint test build scan ci fmt clean renovate-validate cache-dirs \
+.PHONY: help secrets keycloak-build scan-keycloak dev down logs lint test build scan ci fmt clean renovate-validate cache-dirs \
 	api-lint api-test api-spec api-build api-stop api-start web-tools web-deps web-lint web-test web-build web-api-client generate \
 	e2e e2e-deps e2e-lint e2e-version-lock docker-lint workflow-lint compose-lint scan-fs scan-api scan-web \
 	k8s-tools k8s-lint cluster-up cluster-down cluster-smoke cluster-e2e cluster-diagnostics cluster-traffic deploy deploy-apply kubectl
@@ -102,32 +107,51 @@ cache-dirs:
 	@mkdir -p $(CACHE_DIR)/m2/repository $(CACHE_DIR)/pnpm $(CACHE_DIR)/trivy $(CACHE_DIR)/home $(CACHE_DIR)/home/.m2/repository build/reports/trivy build/reports/e2e $(IMAGE_DIR) \
 		$(KIND_DIR) $(CACHE_DIR)/kubeconform $(CLUSTER_REPORT_DIR)
 
-dev: web-tools web-deps ## Start Postgres, Valkey, Mailpit, API and web dev server (http://localhost:5173)
+# Generates the per-checkout dev and test secrets. Idempotent: adds missing keys, keeps existing ones, never prints a value.
+secrets:
+	@umask 077; mkdir -p $(SECRETS_DIR); touch $(SECRETS_FILE); chmod 600 $(SECRETS_FILE); \
+	[ ! -s $(SECRETS_FILE) ] || [ -z "$$(tail -c1 $(SECRETS_FILE))" ] || echo >> $(SECRETS_FILE); \
+	for key in $(SECRET_KEYS); do \
+		if grep -q "^$$key=" $(SECRETS_FILE); then \
+			value=$$(grep -m1 "^$$key=" $(SECRETS_FILE) | cut -d= -f2-); \
+			[ $${#value} -ge 32 ] || { echo "$$key in $(SECRETS_FILE) is shorter than 32 characters; delete that line and run make secrets" >&2; exit 1; }; \
+		else \
+			value=$$(head -c 96 /dev/urandom | base64 -w0 | tr -dc A-Za-z0-9 | cut -c1-40); \
+			[ $${#value} -ge 32 ] || { echo "could not generate $$key" >&2; exit 1; }; \
+			echo "$$key=$$value" >> $(SECRETS_FILE); \
+		fi; \
+	done
+
+keycloak-build: ## Build shop/keycloak:dev (optimised, realm baked in)
+	docker build --build-arg KEYCLOAK_IMAGE=$(KEYCLOAK_IMAGE) --provenance=false --sbom=false -t $(KEYCLOAK_DEV_IMAGE) deploy/keycloak
+
+dev: secrets keycloak-build web-tools web-deps ## Start Postgres, Valkey, Keycloak, Mailpit, API and web dev server (http://localhost:5173)
 	$(COMPOSE) up -d
-	@echo "web http://localhost:5173  mailpit http://localhost:8025  postgres localhost:5432"
+	@echo "web http://localhost:5173  keycloak http://localhost:8180  mailpit http://localhost:8025  postgres localhost:5432"
+	@echo "Test users customer@example.test and admin@example.test; passwords are SHOP_TEST_*_PASSWORD in $(SECRETS_FILE); Keycloak console user admin (KC_BOOTSTRAP_ADMIN_PASSWORD)"
 	@echo "The first API start downloads Maven dependencies; follow it with: make logs"
 
-down: ## Stop the dev stack
+down: secrets ## Stop the dev stack
 	$(COMPOSE) down --remove-orphans
 
-logs: ## Follow dev stack logs
+logs: secrets ## Follow dev stack logs
 	$(COMPOSE) logs -f --tail=100
 
-api-stop: ## Stop the API in the dev stack (to see the unavailable state)
+api-stop: secrets ## Stop the API in the dev stack (to see the unavailable state)
 	$(COMPOSE) stop api
 
-api-start: ## Start the API in the dev stack again
+api-start: secrets ## Start the API in the dev stack again
 	$(COMPOSE) start api
 
 lint: api-lint web-lint e2e-lint e2e-version-lock docker-lint workflow-lint compose-lint k8s-lint ## Spotless, ESLint, tsc, Prettier, hadolint, actionlint, zizmor, compose config, kubeconform
 
 test: api-test web-test ## Unit and integration tests for both apps; fails below 100% coverage
 
-build: api-build web-build ## Build the runtime images shop/api:dev and shop/web:dev
+build: api-build web-build keycloak-build ## Build the runtime images shop/api:dev, shop/web:dev and shop/keycloak:dev
 
-scan: scan-fs scan-api scan-web ## Trivy scans (repo, API image, web image); fails on fixable HIGH/CRITICAL
+scan: scan-fs scan-api scan-web scan-keycloak ## Trivy scans (repo and the API, web and Keycloak images); fails on fixable HIGH/CRITICAL (Keycloak: CRITICAL only)
 
-e2e: build e2e-deps ## Browser tests against the built images; one spec: make e2e E2E_ARGS=specs/catalog.spec.ts
+e2e: secrets build e2e-deps ## Browser tests against the built images; one spec: make e2e E2E_ARGS=specs/catalog.spec.ts
 	trap '$(E2E_DOWN)' INT TERM; \
 	$(E2E_COMPOSE) up -d --wait --wait-timeout 120 && { $(E2E_COMPOSE) --profile runner run --rm -T e2e ./node_modules/.bin/playwright test $(E2E_ARGS); s=$$?; } || s=$$?; \
 	$(E2E_COMPOSE) logs --no-color > build/reports/e2e/stack.log 2>&1 || true; \
@@ -142,7 +166,7 @@ fmt: web-deps e2e-deps ## Apply Spotless and Prettier formatting
 	$(WEB_RUN) pnpm run format
 	$(E2E_RUN) pnpm run format
 
-clean: ## Remove the dev stack, the kind cluster, build outputs and reports (keeps .cache)
+clean: secrets ## Remove the dev stack, the kind cluster, build outputs and reports (keeps .cache)
 	$(COMPOSE) down --volumes --remove-orphans
 	$(E2E_COMPOSE) --profile runner down --volumes --remove-orphans
 	$(MAKE) cluster-down
@@ -210,13 +234,13 @@ e2e-version-lock:
 		echo "Playwright version mismatch: image '$$image' (deploy/versions.mk), @playwright/test '$$package' (tests/e2e/package.json)" >&2; exit 1; fi
 
 docker-lint:
-	docker run --rm --user $(HOST_UID):$(HOST_GID) -v $(CURDIR):/work:ro -w /work $(HADOLINT_IMAGE) hadolint services/api/Dockerfile apps/web/Dockerfile deploy/k8s-tools/Dockerfile
+	docker run --rm --user $(HOST_UID):$(HOST_GID) -v $(CURDIR):/work:ro -w /work $(HADOLINT_IMAGE) hadolint services/api/Dockerfile apps/web/Dockerfile deploy/k8s-tools/Dockerfile deploy/keycloak/Dockerfile
 
 workflow-lint:
 	docker run --rm --user $(HOST_UID):$(HOST_GID) -v $(CURDIR):/repo:ro -w /repo $(ACTIONLINT_IMAGE) -color
 	docker run --rm --user $(HOST_UID):$(HOST_GID) -v $(CURDIR):/repo:ro -w /repo $(ZIZMOR_IMAGE) --offline .github/workflows
 
-compose-lint:
+compose-lint: secrets
 	$(COMPOSE) config -q
 	$(E2E_COMPOSE) --profile runner config -q
 
@@ -231,6 +255,11 @@ scan-web: cache-dirs web-build
 	docker save $(WEB_IMAGE) -o $(IMAGE_DIR)/web.tar
 	$(call trivy_report,image --input /build/images/web.tar,web,rm -f $(IMAGE_DIR)/web.tar)
 
+# Third-party image that we only re-optimise: fixable CRITICAL fails, HIGH is reported (gated in slice 6). Exceptions expire in deploy/keycloak/.trivyignore.yaml.
+scan-keycloak: cache-dirs keycloak-build
+	docker save $(KEYCLOAK_DEV_IMAGE) -o $(IMAGE_DIR)/keycloak.tar
+	$(call trivy_report,image --ignorefile /src/deploy/keycloak/.trivyignore.yaml --input /build/images/keycloak.tar,keycloak,rm -f $(IMAGE_DIR)/keycloak.tar,CRITICAL)
+
 k8s-tools:
 	docker build --build-arg KUBECTL_IMAGE=$(KUBECTL_IMAGE) --build-arg DOCKER_CLI_IMAGE=$(DOCKER_CLI_IMAGE) \
 		--build-arg GOLANG_IMAGE=$(GOLANG_IMAGE) --build-arg ALPINE_IMAGE=$(ALPINE_IMAGE) \
@@ -243,7 +272,9 @@ cluster-up: cache-dirs k8s-tools ## Create the kind cluster with Calico, Envoy G
 	elif [ -z "$$(docker ps -q --filter $(KIND_LABEL))" ]; then \
 		docker start $(CLUSTER_NAME)-control-plane; \
 	fi
+	@docker port $(CLUSTER_NAME)-control-plane 30089 >/dev/null 2>&1 || { echo "the kind node lacks the Keycloak port mapping (30089); recreate it: make cluster-down cluster-up" >&2; exit 1; }
 	@( umask 077; $(KIND) get kubeconfig --internal --name $(CLUSTER_NAME) > $(KIND_DIR)/kubeconfig ); chmod 600 $(KIND_DIR)/kubeconfig
+	@for attempt in $$(seq 60); do $(KUBECTL) get --raw /readyz >/dev/null 2>&1 && exit 0; sleep 2; done; echo "the API server did not become ready (/readyz)" >&2; exit 1
 	$(KUBECTL) apply --server-side -k deploy/kind/calico
 	$(KUBECTL) -n kube-system rollout status ds/calico-node --timeout=300s
 	$(KUBECTL) -n kube-system rollout status deploy/calico-kube-controllers --timeout=300s
@@ -258,22 +289,46 @@ cluster-down: ## Remove the kind cluster and its kubeconfig
 	@ids=$$(docker ps -aq --filter $(KIND_LABEL)); if [ -n "$$ids" ]; then docker rm -f -v $$ids; fi
 	rm -rf $(KIND_DIR)
 
-deploy: build k8s-tools cache-dirs ## Load the :dev images into kind and apply the app (needs make cluster-up)
+deploy: secrets build k8s-tools cache-dirs ## Load the :dev images into kind and apply the app (needs make cluster-up)
 	@if [ -z "$$(docker ps -q --filter $(KIND_LABEL))" ]; then echo "run make cluster-up first" >&2; exit 1; fi
 	@$(MAKE) --no-print-directory deploy-apply cluster-smoke || { $(MAKE) --no-print-directory cluster-diagnostics; exit 1; }
 	@echo "http://localhost:$(CLUSTER_PORT)"
 
+# Creates the Secrets the manifests reference from .cache/secrets/shop.env, which is mounted read-only. Nothing is printed; the keys are the variable names.
+define apply_secrets
+$(K8S_DOCKER) -v $(SECRETS_DIR):/secrets:ro $(K8S_TOOLS_IMAGE) sh -c ' \
+	set -e; . /secrets/shop.env; \
+	apply() { kubectl apply --server-side --field-manager=shop-deploy -f - > /dev/null; }; \
+	kubectl -n shop create secret generic shop-auth --from-literal="SHOP_AUTH_CLIENT_SECRET=$$SHOP_AUTH_CLIENT_SECRET" --dry-run=client -o yaml | apply; \
+	kubectl -n shop create secret generic valkey-auth --from-literal="VALKEY_PASSWORD=$$VALKEY_PASSWORD" --dry-run=client -o yaml | apply; \
+	kubectl -n shop create secret generic keycloak-test-users --from-literal="SHOP_TEST_CUSTOMER_PASSWORD=$$SHOP_TEST_CUSTOMER_PASSWORD" \
+		--from-literal="SHOP_TEST_ADMIN_PASSWORD=$$SHOP_TEST_ADMIN_PASSWORD" --dry-run=client -o yaml | apply'
+endef
+
+# Namespace and Secrets go in before the workloads so no pod starts against an old Secret. Each Deployment carries a hash of only the Secrets it consumes
+# (values in a fixed order, never printed), so a changed secret rolls exactly its consumers. VALKEY_IMAGE (versions.mk) is the only Valkey pin.
 # The image ID goes into a pod template annotation so a rebuilt :dev image rolls the pods exactly once and an unchanged one is a no-op.
 deploy-apply:
-	$(KIND) load docker-image --name $(CLUSTER_NAME) $(API_IMAGE) $(WEB_IMAGE)
-	@$(K8S_DOCKER) -e API_IMAGE_ID=$$(docker image inspect -f '{{.Id}}' $(API_IMAGE)) -e WEB_IMAGE_ID=$$(docker image inspect -f '{{.Id}}' $(WEB_IMAGE)) $(K8S_TOOLS_IMAGE) sh -c ' \
+	$(KIND) load docker-image --name $(CLUSTER_NAME) $(API_IMAGE) $(WEB_IMAGE) $(KEYCLOAK_DEV_IMAGE)
+	$(K8S_DOCKER) $(K8S_TOOLS_IMAGE) kubectl apply --server-side --field-manager=shop-deploy -f deploy/k8s/base/namespace.yaml
+	@$(call apply_secrets)
+	@$(K8S_DOCKER) -v $(SECRETS_DIR):/secrets:ro -e API_IMAGE_ID=$$(docker image inspect -f '{{.Id}}' $(API_IMAGE)) -e WEB_IMAGE_ID=$$(docker image inspect -f '{{.Id}}' $(WEB_IMAGE)) \
+		-e KEYCLOAK_IMAGE_ID=$$(docker image inspect -f '{{.Id}}' $(KEYCLOAK_DEV_IMAGE)) -e VALKEY_IMAGE $(K8S_TOOLS_IMAGE) sh -c ' \
+		set -e; . /secrets/shop.env; \
+		hash() { printf "%s\n" "$$@" | sha256sum | cut -d" " -f1; }; \
+		SHOP_AUTH_HASH=$$(hash "$$SHOP_AUTH_CLIENT_SECRET"); VALKEY_AUTH_HASH=$$(hash "$$VALKEY_PASSWORD"); \
+		KEYCLOAK_TEST_USERS_HASH=$$(hash "$$SHOP_TEST_CUSTOMER_PASSWORD" "$$SHOP_TEST_ADMIN_PASSWORD"); \
 		for attempt in 1 2 3; do \
 			kubectl kustomize deploy/k8s/overlays/local \
-				| sed -e "s/api-image-id-placeholder/$$API_IMAGE_ID/" -e "s/web-image-id-placeholder/$$WEB_IMAGE_ID/" \
+				| sed -e "s/api-image-id-placeholder/$$API_IMAGE_ID/" -e "s/web-image-id-placeholder/$$WEB_IMAGE_ID/" -e "s/keycloak-image-id-placeholder/$$KEYCLOAK_IMAGE_ID/" \
+				-e "s/shop-auth-hash-placeholder/$$SHOP_AUTH_HASH/" -e "s/valkey-auth-hash-placeholder/$$VALKEY_AUTH_HASH/" -e "s/keycloak-test-users-hash-placeholder/$$KEYCLOAK_TEST_USERS_HASH/" \
+				-e "s|valkey-image-placeholder|$$VALKEY_IMAGE|" \
 				| kubectl apply --server-side --field-manager=shop-deploy -f - && exit 0; \
 			echo "apply failed (attempt $$attempt of 3)" >&2; sleep 10; \
 		done; exit 1'
-	$(KUBECTL) wait --for=condition=Ready cluster.postgresql.cnpg.io/shop-db -n shop --timeout=300s
+	$(KUBECTL) wait --for=condition=Ready cluster.postgresql.cnpg.io/shop-db cluster.postgresql.cnpg.io/keycloak-db -n shop --timeout=300s
+	$(KUBECTL) -n shop rollout status deploy/valkey --timeout=300s
+	$(KUBECTL) -n shop rollout status deploy/keycloak --timeout=420s
 	$(KUBECTL) -n shop rollout status deploy/api --timeout=300s
 	$(KUBECTL) -n shop rollout status deploy/web --timeout=300s
 	$(KUBECTL) -n shop wait --for=condition=Programmed gateway/shop --timeout=180s
@@ -291,13 +346,15 @@ cluster-smoke:
 		echo "smoke ok: GET $$path"; \
 	done
 
-cluster-e2e: e2e-deps k8s-tools cache-dirs ## Playwright and NetworkPolicy tests against the kind cluster (run make cluster-up deploy first)
+cluster-e2e: secrets e2e-deps k8s-tools cache-dirs ## Playwright and NetworkPolicy tests against the kind cluster (run make cluster-up deploy first)
 	rm -rf $(CLUSTER_REPORT_DIR)
 	mkdir -p $(CLUSTER_REPORT_DIR)
 	@status=0; \
 	$(MAKE) --no-print-directory cluster-smoke || status=1; \
+	set -a; . $(SECRETS_FILE); set +a; \
 	docker run --rm --init --shm-size 1g --network kind --user $(HOST_UID):$(HOST_GID) -e HOME=/cache/home -e CI=true \
-		-e E2E_UPSTREAM=shop-control-plane:30080 -e E2E_REPORT_DIR=/reports \
+		-e E2E_UPSTREAM=shop-control-plane:30080 -e E2E_IDP_UPSTREAM=shop-control-plane:30089 -e E2E_REPORT_DIR=/reports \
+		-e SHOP_TEST_CUSTOMER_PASSWORD -e SHOP_TEST_ADMIN_PASSWORD \
 		-v $(CURDIR)/tests/e2e:/e2e:ro -v $(CACHE_DIR)/home:/cache/home -v $(CURDIR)/$(CLUSTER_REPORT_DIR):/reports -w /e2e \
 		$(PLAYWRIGHT_IMAGE) ./node_modules/.bin/playwright test $(E2E_ARGS) || status=1; \
 	{ $(K8S_RUN) sh tests/e2e/cluster/network-policy-test.sh 2>&1 | tee $(CLUSTER_REPORT_DIR)/network-policy.log; } || status=1; \

@@ -81,6 +81,74 @@ spec:
 apiVersion: v1
 kind: Pod
 metadata:
+  name: netpol-probe-keycloak
+  namespace: shop
+  labels:
+    shop.dev/netpol-probe: 'true'
+    app.kubernetes.io/name: keycloak
+spec:
+  automountServiceAccountToken: false
+  terminationGracePeriodSeconds: 1
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 26
+    runAsGroup: 26
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: probe
+      image: PROBE_IMAGE
+      command: ['sleep', '600']
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          cpu: 100m
+          memory: 64Mi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: netpol-probe-valkey
+  namespace: shop
+  labels:
+    shop.dev/netpol-probe: 'true'
+    app.kubernetes.io/name: valkey
+spec:
+  automountServiceAccountToken: false
+  terminationGracePeriodSeconds: 1
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 26
+    runAsGroup: 26
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: probe
+      image: PROBE_IMAGE
+      command: ['sleep', '600']
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          cpu: 100m
+          memory: 64Mi
+---
+apiVersion: v1
+kind: Pod
+metadata:
   name: netpol-probe-other
   namespace: shop
   labels:

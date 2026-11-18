@@ -7,7 +7,7 @@ import java.util.Map;
 import java.util.Set;
 import org.springdoc.core.customizers.OpenApiCustomizer;
 
-/** Generated clients should see no optional fields, so every non-nullable property is required. */
+/** Generated clients should see no optional fields, so every property is required; a nullable one is required but may be null. */
 class RequiredPropertiesCustomizer implements OpenApiCustomizer {
 
     /** RFC 9457 members are optional by definition. */
@@ -27,16 +27,7 @@ class RequiredPropertiesCustomizer implements OpenApiCustomizer {
         if (properties == null) {
             return;
         }
-        List<String> required = properties.entrySet().stream()
-                .filter(property -> !isNullable(property.getValue()))
-                .map(Map.Entry::getKey)
-                .sorted()
-                .toList();
+        List<String> required = properties.keySet().stream().sorted().toList();
         schema.setRequired(required);
-    }
-
-    private static boolean isNullable(Schema<?> schema) {
-        boolean nullableType = schema.getTypes() != null && schema.getTypes().contains("null");
-        return nullableType || Boolean.TRUE.equals(schema.getNullable());
     }
 }

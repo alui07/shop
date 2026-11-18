@@ -2,6 +2,9 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from '@tanstack/react-router';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import '@/lib/zod';
+import { apiClient } from '@/api/client';
+import { createApiMiddleware } from '@/api/middleware';
 import { createQueryClient } from '@/lib/queryClient';
 import { createAppRouter } from './router';
 import './index.css';
@@ -12,6 +15,7 @@ if (!root) {
 }
 
 const queryClient = createQueryClient();
+apiClient.use(createApiMiddleware(queryClient));
 const router = createAppRouter(queryClient);
 
 createRoot(root).render(

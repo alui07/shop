@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from '@/lib/zod';
 
 export const SORT_OPTIONS = [
   { value: 'relevance', label: 'Relevance' },
@@ -22,18 +22,25 @@ function hasNoControlCharacters(value: string): boolean {
   });
 }
 
-// Zod probes for eval support with `new Function`, which the enforced CSP reports as a script-src violation.
-z.config({ jitless: true });
+export const queryField = z
+  .string()
+  .trim()
+  .min(1)
+  .max(MAX_QUERY_LENGTH)
+  .refine(hasNoControlCharacters)
+  .optional()
+  .catch(undefined);
+
+export const pageField = z.coerce
+  .number()
+  .int()
+  .min(2)
+  .max(MAX_URL_PAGE)
+  .optional()
+  .catch(undefined);
 
 const catalogSearchSchema = z.object({
-  q: z
-    .string()
-    .trim()
-    .min(1)
-    .max(MAX_QUERY_LENGTH)
-    .refine(hasNoControlCharacters)
-    .optional()
-    .catch(undefined),
+  q: queryField,
   category: z
     .string()
     .trim()
@@ -43,7 +50,7 @@ const catalogSearchSchema = z.object({
     .optional()
     .catch(undefined),
   sort: z.enum(SORT_VALUES).optional().catch(undefined),
-  page: z.coerce.number().int().min(2).max(MAX_URL_PAGE).optional().catch(undefined),
+  page: pageField,
 });
 
 export type CatalogSearch = z.output<typeof catalogSearchSchema>;

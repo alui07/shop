@@ -4,6 +4,18 @@ metadata:
   name: shop-proxy
   namespace: shop
 spec:
+  # The query string is never logged: authorization codes and id_token_hint travel in it (C16).
+  telemetry:
+    accessLog:
+      settings:
+        - format:
+            type: Text
+            text: |
+              [%START_TIME%] "%REQ(:METHOD)% %REQ_WITHOUT_QUERY(X-ENVOY-ORIGINAL-PATH?:PATH)% %PROTOCOL%" %RESPONSE_CODE% %RESPONSE_FLAGS% %BYTES_RECEIVED% %BYTES_SENT% %DURATION% "%REQ(X-FORWARDED-FOR)%" "%REQ(USER-AGENT)%" "%REQ(:AUTHORITY)%" "%UPSTREAM_HOST%"
+          sinks:
+            - type: File
+              file:
+                path: /dev/stdout
   provider:
     type: Kubernetes
     kubernetes:
@@ -16,6 +28,8 @@ spec:
               ports:
                 - port: 80
                   nodePort: 30080
+                - port: 8089
+                  nodePort: 30089
       envoyDeployment:
         replicas: 1
         container:

@@ -34,8 +34,8 @@ Checks that cannot be automated here. Each has the reason, the steps, the expect
     3. Zero-drop rollout: in terminal A run `make cluster-traffic`. In terminal B run `make kubectl ARGS="-n shop rollout restart deploy/api"`, then `make kubectl ARGS="-n shop rollout status deploy/api"`. Terminal A must print no `FAIL`. Repeat for `web`.
     4. Database outage: `make kubectl ARGS="-n shop delete pod shop-db-1"`. `/status` shows the API unavailable, then recovers without a reload once CNPG restarts the instance.
     5. Pod Security: `make kubectl ARGS="-n shop run pss-check --image=busybox --restart=Never -- id"` is rejected by `restricted`.
-    6. `make kubectl ARGS="-n shop get networkpolicy"` lists the seven policies. `make kubectl ARGS="get pods -A"` shows Calico, Envoy Gateway and CNPG running.
-    7. Memory: `docker stats shop-control-plane --no-stream`; compare with the figure in `README.md`.
+    6. `make kubectl ARGS="-n shop get networkpolicy"` lists the sixteen policies. `make kubectl ARGS="get pods -A"` shows Calico, Envoy Gateway and CNPG running.
+    7. Memory: `docker stats shop-control-plane --no-stream`; compare with the figure in `README.md` (about 3.5 GiB with Keycloak).
     8. `make cluster-down`. `docker ps` shows no `shop-control-plane`.
   - Expected: every step behaves as described.
 
@@ -43,6 +43,49 @@ Checks that cannot be automated here. Each has the reason, the steps, the expect
   - Why manual: the job has never run on a GitHub runner.
   - Steps: open the pull request and watch the `cluster-e2e` job next to `ci`.
   - Expected: both pass. Record the job's duration in `docs/plans/STATUS.md`.
+
+## Authentication (slice 3a)
+
+Run these on `make dev` (Keycloak on http://localhost:8180) unless a step says kind. Passwords for `customer@example.test` and `admin@example.test` are in `.cache/secrets/shop.env`; read them from the file, do not paste them into notes or issues.
+
+- [ ] **Back-channel logout from the account console**
+  - Why manual: it needs a person in the Keycloak account console; e2e covers the IdP-initiated logout endpoint only.
+  - Steps: sign in as the customer at http://localhost:5173. In another tab open http://localhost:8180/realms/shop/account, go to Device activity (Signed in devices), and choose "Sign out all devices". Reload the shop tab.
+  - Expected: the shop shows you signed out (`/api/me` answers `authenticated: false`) without any action in that tab.
+
+- [ ] **Keycloak restart, then sign out (C3)**
+  - Why manual: it needs a restart mid-session and a person watching the browser.
+  - Steps: on kind (`make cluster-up deploy`, http://localhost:8088), sign in. Run `make kubectl ARGS="-n shop rollout restart deploy/keycloak"` and wait for `rollout status` (2 to 3 minutes). Click Sign out in the shop.
+  - Expected: the app session ends before the redirect; Keycloak may show an error page at the end of logout, and the SPA tolerates it. Reloading the shop shows you signed out. The restart re-created the realm, so signing in again needs the form.
+
+- [ ] **Valkey restart signs everyone out**
+  - Why manual: it needs a person to restart a dependency and watch the browser.
+  - Steps: sign in on `make dev`. Run `docker compose -f deploy/compose/compose.yaml --env-file .cache/secrets/shop.env restart valkey` (or on kind `make kubectl ARGS="-n shop rollout restart deploy/valkey"`). Reload.
+  - Expected: you are signed out; the catalog works throughout. While Valkey is down, a reload with the stale cookie may show an error and the anonymous catalog without a cookie stays up.
+
+- [ ] **Keycloak down**
+  - Why manual: it needs a person to stop a dependency and watch several states over time.
+  - Steps: sign in on `make dev`. Run `docker compose -f deploy/compose/compose.yaml --env-file .cache/secrets/shop.env stop keycloak`. Browse the catalog, then open a private window and press Sign in. In the signed-in window keep using the site (admin page for the admin). Start Keycloak again afterwards.
+  - Expected: the catalog works; sign-in cannot reach Keycloak (the browser shows a connection error; if the API cannot validate the token the home page shows the failed-login alert); the existing session keeps working until the revalidation grace (15 minutes after the last successful check) ends, then the next request signs you out.
+
+- [ ] **Absolute session timeout**
+  - Why manual: it takes 8 hours of wall clock; the automated test moves a fake clock.
+  - Steps: sign in and keep the tab active at least every 20 minutes (idle timeout is 30). After 8 hours, make any request, for example open `/admin` as the admin.
+  - Expected: the session has ended: signed out, no admin data. `SessionTimeoutIT` proves the rule with a fake clock.
+
+**Expired `id_token_hint` on kind (C23): not testable by hand**
+  - Why there is no manual check: the revalidation filter runs before the logout filter, so after more than 5 minutes `POST /logout` first refreshes the ID token and the hint is fresh again. An expired hint reaches Keycloak only while Keycloak is down and the 15-minute grace applies, which cannot end in a working logout redirect anyway.
+  - Proof instead: the compose e2e spec `logout.spec.ts` (10 second token lifespan) shows Keycloak 26.8 accepts an expired hint; it skips on kind. No fallback is built.
+
+- [ ] **Memory reading with Keycloak**
+  - Why manual: the numbers depend on the machine.
+  - Steps: with `make cluster-up deploy` finished and the app signed in once, run `docker stats shop-control-plane --no-stream`. Separately, with `make dev` up, run `docker stats --no-stream`.
+  - Expected: the kind node is near 3.5 GiB (README); Keycloak is 600 to 750 MB per instance. Do not run `make dev`, `make e2e` and the cluster together; they approach the 12 GB WSL limit. If the numbers drift, update `README.md`.
+
+- [ ] **Sign-in and admin page by keyboard and screen reader**
+  - Why manual: axe does not judge focus order or announcements.
+  - Steps: with `make dev`, use only the keyboard to open Sign in, complete the Keycloak form, reach the user menu, open Admin, search and page the table, then sign out. Repeat with a screen reader.
+  - Expected: logical, visible focus; the sign-in prompt, "no access" panel and failed-login alert are announced.
 
 ## After the first push to GitHub
 

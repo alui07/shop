@@ -57,3 +57,10 @@ export async function settle(page: Page): Promise<void> {
   await page.waitForLoadState('networkidle');
   await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 250)));
 }
+
+// Chromium ignores COOP on plain http outside localhost; the test stack is http://gateway:8080.
+export const isInsecureOriginNotice = (error: ConsoleError) =>
+  error.text.startsWith('The Cross-Origin-Opener-Policy header has been ignored');
+
+export const isFailedLoadOf = (error: ConsoleError, status: number, urlPart: string) =>
+  error.text.includes(`status of ${status}`) && error.url.includes(urlPart);

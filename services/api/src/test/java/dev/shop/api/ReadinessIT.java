@@ -3,14 +3,13 @@ package dev.shop.api;
 import static dev.shop.api.support.HttpGet.statusOf;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import dev.shop.api.support.PostgresTestConfiguration;
+import dev.shop.api.support.TestInfrastructure;
 import java.time.Duration;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalManagementPort;
-import org.springframework.context.annotation.Import;
 import org.springframework.test.annotation.DirtiesContext;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
@@ -22,7 +21,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
             "spring.datasource.hikari.connection-timeout=250",
             "spring.datasource.hikari.validation-timeout=250"
         })
-@Import(PostgresTestConfiguration.class)
+@TestInfrastructure
 class ReadinessIT {
 
     @LocalManagementPort
