@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './support/test';
 import { openCatalog, pagination, productCards, productNames } from './support/catalog';
 
 test('paging forward and back updates the URL and the products', async ({ page }) => {

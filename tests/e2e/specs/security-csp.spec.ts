@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './support/test';
 import { collectBrowserDiagnostics, settle, type ConsoleError } from './support/csp';
 import { simulateCatalogOutage } from './support/catalog';
 

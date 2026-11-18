@@ -27,6 +27,27 @@
       "description": "MCR tags carry no release timestamp, so the 7-day gate would hold this image forever; the npm package keeps the gate",
       "matchPackageNames": ["mcr.microsoft.com/playwright"],
       "minimumReleaseAgeBehaviour": "timestamp-optional"
+    },
+    {
+      "description": "The kindest/node digest must come from the kind release notes; bump it by hand together with KIND_VERSION",
+      "matchPackageNames": ["kindest/node"],
+      "enabled": false
+    },
+    {
+      "description": "Stay within the kind node's Kubernetes minor; raise this together with the node image. registry.k8s.io gives no release timestamps, so the 7-day gate holds kubectl updates indefinitely; bump by hand (no timestamp-optional without the owner)",
+      "matchPackageNames": ["registry.k8s.io/kubectl"],
+      "allowedVersions": "<1.37"
+    },
+    {
+      "description": "CloudNativePG operand tags look like 18.6-202611090812-minimal-trixie; a major upgrade needs a planned pg_upgrade",
+      "matchPackageNames": ["ghcr.io/cloudnative-pg/postgresql"],
+      "versioning": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)-(?<patch>\\d{12})-(?<compatibility>\\S+)$",
+      "allowedVersions": "<19"
+    },
+    {
+      "description": "Cluster-breaking updates stay out of the general non-major PR; the cluster-e2e job gates them.",
+      "matchPackageNames": ["sigs.k8s.io/kind", "helm.sh/helm/v4", "docker.io/envoyproxy/gateway-helm", "cloudnative-pg", "ghcr.io/cloudnative-pg/postgresql", "projectcalico/calico", "registry.k8s.io/kubectl", "ghcr.io/yannh/kubeconform"],
+      "groupName": "cluster platform"
     }
   ],
   "customManagers": [
@@ -34,9 +55,19 @@
       "description": "Versions annotated with '# renovate:' in deploy/versions.mk",
       "customType": "regex",
       "managerFilePatterns": ["/^deploy/versions\\.mk$/"],
-      "matchStrings": [
-        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n\\w+ := (?:[\\w./-]+:)?(?<currentValue>[^@\\s]+)(?:@(?<currentDigest>sha256:[a-f0-9]+))?"
-      ]
+      "matchStrings": ["# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: registryUrl=(?<registryUrl>\\S+))?\\n\\w+ := (?:[\\w./-]+:)?(?<currentValue>[^@\\s]+)(?:@(?<currentDigest>sha256:[a-f0-9]+))?"]
+    },
+    {
+      "description": "Image pins next to a '# renovate:' comment in the Kubernetes manifests",
+      "customType": "regex",
+      "managerFilePatterns": ["/^deploy/(k8s|kind)/.+\\.ya?ml$/"],
+      "matchStrings": ["[ \\t]*# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n[ \\t]*imageName: (?:[\\w./-]+:)?(?<currentValue>[^@\\s]+)(?:@(?<currentDigest>sha256:[a-f0-9]+))?"]
+    },
+    {
+      "description": "Calico release named in the version comment under the renovate annotation; the commit SHA in the URL is updated together with it",
+      "customType": "regex",
+      "managerFilePatterns": ["/^deploy/kind/calico/kustomization\\.yaml$/"],
+      "matchStrings": ["# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n\\s*# (?<currentValue>v\\d+\\.\\d+\\.\\d+)\\n\\s*- \\S+/calico/(?<currentDigest>[a-f0-9]{40})/manifests"]
     }
   ]
 }

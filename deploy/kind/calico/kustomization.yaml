@@ -1,0 +1,34 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  # renovate: datasource=github-tags depName=projectcalico/calico
+  # v3.32.3
+  - https://raw.githubusercontent.com/projectcalico/calico/128558a0f74d75c41d8584cfce9fdb50644e9e9a/manifests/calico.yaml
+patches:
+  - target:
+      kind: DaemonSet
+      name: calico-node
+      namespace: kube-system
+    patch: |-
+      apiVersion: apps/v1
+      kind: DaemonSet
+      metadata:
+        name: calico-node
+        namespace: kube-system
+      spec:
+        template:
+          spec:
+            containers:
+              - name: calico-node
+                # kind nodes mount /sys read-only, so calico-node cannot create /sys/kernel/security
+                volumeMounts:
+                  - mountPath: /sys/kernel/security
+                    $patch: delete
+                env:
+                  - name: CALICO_IPV4POOL_CIDR
+                    value: 10.244.0.0/16
+                  - name: CALICO_IPV4POOL_IPIP
+                    value: Never
+            volumes:
+              - name: sys-kernel-security
+                $patch: delete

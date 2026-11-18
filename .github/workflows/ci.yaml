@@ -33,6 +33,7 @@ jobs:
             .cache/m2
             .cache/pnpm
             .cache/home/.cache/pnpm
+            .cache/kubeconform
           key: deps-${{ runner.os }}-${{ hashFiles('services/api/pom.xml', 'apps/web/pnpm-lock.yaml', 'tests/e2e/pnpm-lock.yaml', 'deploy/versions.mk') }}
           restore-keys: |
             deps-${{ runner.os }}-
@@ -78,5 +79,42 @@ jobs:
         with:
           name: e2e-reports
           path: build/reports/e2e
+          if-no-files-found: ignore
+          retention-days: 7
+
+  cluster-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Restore Maven and pnpm downloads
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .cache/m2
+            .cache/pnpm
+            .cache/home/.cache/pnpm
+            .cache/kubeconform
+          key: deps-${{ runner.os }}-${{ hashFiles('services/api/pom.xml', 'apps/web/pnpm-lock.yaml', 'tests/e2e/pnpm-lock.yaml', 'deploy/versions.mk') }}
+          restore-keys: |
+            deps-${{ runner.os }}-
+
+      - run: make cluster-up deploy cluster-e2e
+
+      - name: Collect cluster diagnostics
+        if: failure() || cancelled()
+        run: make cluster-diagnostics
+
+      - name: Upload cluster end-to-end reports
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cluster-e2e-reports
+          path: build/reports/cluster-e2e
           if-no-files-found: ignore
           retention-days: 7

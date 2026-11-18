@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './support/test';
 
 test('GET /api/status responds with JSON through the gateway', async ({ request }) => {
   const response = await request.get('/api/status');

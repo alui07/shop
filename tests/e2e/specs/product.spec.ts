@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './support/test';
 import { openCatalog, productCards } from './support/catalog';
 
 test('a product page opens from a card and the browser back button restores the search', async ({

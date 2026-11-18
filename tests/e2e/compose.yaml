@@ -69,7 +69,7 @@ services:
     environment:
       HOME: /cache/home
       CI: 'true'
-      E2E_BASE_URL: http://gateway:8080
+      E2E_UPSTREAM: gateway:8080
       E2E_REPORT_DIR: /reports
     volumes:
       - .:/e2e:ro

@@ -33,3 +33,28 @@ PLAYWRIGHT_IMAGE := mcr.microsoft.com/playwright:v1.65.0-noble@sha256:9beb546099
 RENOVATE_IMAGE := ghcr.io/renovatebot/renovate:44.247.2@sha256:5b777fc44b9736e4bd656ba7c54dc54fb76290b2701983c0bb06f16df0c54ad5
 # renovate: datasource=docker depName=alpine
 ALPINE_IMAGE := alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
+
+# renovate: datasource=go depName=sigs.k8s.io/kind
+KIND_VERSION := v0.33.0
+# The node image digest comes from the kind release notes; bump it by hand together with KIND_VERSION.
+# renovate: datasource=docker depName=kindest/node
+KIND_NODE_IMAGE := kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed
+# renovate: datasource=docker depName=registry.k8s.io/kubectl
+KUBECTL_IMAGE := registry.k8s.io/kubectl:v1.36.6@sha256:0650805141538d13ccbb6bb9e0dd647bc415bc002898357970211c4d47224396
+# renovate: datasource=go depName=helm.sh/helm/v4
+HELM_VERSION := v4.3.1
+# renovate: datasource=docker depName=ghcr.io/yannh/kubeconform
+KUBECONFORM_IMAGE := ghcr.io/yannh/kubeconform:v0.8.0-alpine@sha256:6b90a5f23d846140ce0194fe050b1995e546eba938f3a6bf10c039dd5e24588f
+# renovate: datasource=docker depName=golang
+GOLANG_IMAGE := golang:1.27.3-alpine3.24@sha256:fa3d596898d9f126af7c01d14ee7597bab3f39cccf392ef36b69fe77cd681f18
+# renovate: datasource=docker depName=docker
+DOCKER_CLI_IMAGE := docker:29.9.2-cli@sha256:5e6baf67325a79f64ed3bed6863954d5e05d0f3d4e57cbdb14809346814bbfdb
+
+# renovate: datasource=docker depName=docker.io/envoyproxy/gateway-helm
+ENVOY_GATEWAY_CHART_VERSION := v1.10.0
+# renovate: datasource=helm depName=cloudnative-pg registryUrl=https://cloudnative-pg.github.io/charts
+CNPG_CHART_VERSION := 0.29.1
+
+# Schema commits for k8s-lint; update by hand together with the node image and chart versions (the CRD schemas must match the charts).
+K8S_SCHEMAS_REF := 9367d1ce1c88b8bbf6ee06d0e80510f26394913f
+CRD_SCHEMAS_REF := 49729e49e8f062933e3716a26540d41b0cd0856c
