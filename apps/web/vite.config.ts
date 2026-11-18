@@ -6,6 +6,11 @@ import { defineConfig } from 'vitest/config';
 
 const underVitest = process.env['VITEST'] !== undefined;
 
+const apiProxy = {
+  target: process.env['API_PROXY_TARGET'] ?? 'http://localhost:8080',
+  changeOrigin: true,
+};
+
 export default defineConfig({
   plugins: [
     ...(underVitest ? [] : [tanstackRouter({ target: 'react', autoCodeSplitting: true })]),
@@ -20,10 +25,10 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
-      '/api': {
-        target: process.env['API_PROXY_TARGET'] ?? 'http://localhost:8080',
-        changeOrigin: true,
-      },
+      '/api': apiProxy,
+      '/oauth2/': apiProxy,
+      '/login/oauth2/': apiProxy,
+      '^/logout$': apiProxy,
     },
   },
   test: {

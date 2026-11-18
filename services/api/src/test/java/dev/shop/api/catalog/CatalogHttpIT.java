@@ -133,7 +133,7 @@ class CatalogHttpIT {
         HttpResponse<String> response = get(port, "/api/products/" + slug);
 
         assertThat(response.statusCode()).isEqualTo(400);
-        assertThat(response.headers().firstValue("Content-Type")).hasValue("application/problem+json");
+        assertThat(response.headers().firstValue("Content-Type").orElseThrow()).startsWith("application/problem+json");
     }
 
     @ParameterizedTest
@@ -189,10 +189,10 @@ class CatalogHttpIT {
     }
 
     @Test
-    void unknownPathsAreProblemDetailsNotFound() {
+    void unknownPathsAreDeniedByDefaultWithAProblem() {
         HttpResponse<String> response = get(port, "/api/nothing");
 
-        assertThat(response.statusCode()).isEqualTo(404);
-        assertThat(response.headers().firstValue("Content-Type")).hasValue("application/problem+json");
+        assertThat(response.statusCode()).isEqualTo(401);
+        assertThat(response.headers().firstValue("Content-Type").orElseThrow()).startsWith("application/problem+json");
     }
 }

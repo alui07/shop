@@ -1,3 +1,3 @@
 package dev.shop.api.catalog;
 
-record Money(long amountMinor, String currency) {}
+public record Money(long amountMinor, String currency) {}

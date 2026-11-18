@@ -1,5 +1,5 @@
 #!/bin/sh
-# Proves the NetworkPolicies enforce: 2 connections must work, 7 must be dropped.
+# Proves the NetworkPolicies enforce: 6 connections must work, 16 must be dropped.
 # Run from the repo root in the k8s tools container (kubectl on PATH, KUBECONFIG set).
 set -u
 
@@ -50,17 +50,31 @@ kubectl wait --for=condition=Ready pod -l shop.dev/netpol-probe=true -n shop --t
 kubectl wait --for=condition=Ready pod/netpol-probe-outside -n netpol-probe --timeout=90s || exit 1
 
 check allow shop netpol-probe-api shop-db-rw 5432
+check allow shop netpol-probe-api valkey 6379
+check allow shop netpol-probe-api keycloak 8080
+check allow shop netpol-probe-keycloak api 8080
+check allow shop netpol-probe-keycloak keycloak-db-rw 5432
+check allow netpol-probe netpol-probe-outside kube-dns.kube-system 53
+
 check deny shop netpol-probe-web shop-db-rw 5432
 check deny shop netpol-probe-other shop-db-rw 5432
 check deny shop netpol-probe-web api 8080
 check deny shop netpol-probe-api web 8080
-check allow netpol-probe netpol-probe-outside kube-dns.kube-system 53
 check deny netpol-probe netpol-probe-outside api.shop 8080
 check deny netpol-probe netpol-probe-outside shop-db-rw.shop 5432
 check deny netpol-probe netpol-probe-outside web.shop 8080
+check deny shop netpol-probe-web valkey 6379
+check deny shop netpol-probe-web keycloak 8080
+check deny shop netpol-probe-other valkey 6379
+check deny shop netpol-probe-keycloak shop-db-rw 5432
+check deny shop netpol-probe-keycloak valkey 6379
+check deny shop netpol-probe-api keycloak-db-rw 5432
+check deny shop netpol-probe-api keycloak 9000
+check deny netpol-probe netpol-probe-outside keycloak.shop 8080
+check deny netpol-probe netpol-probe-outside valkey.shop 6379
 
 if [ "$failures" -ne 0 ]; then
-  echo "$failures of 9 NetworkPolicy checks failed"
+  echo "$failures of 22 NetworkPolicy checks failed"
   exit 1
 fi
-echo "all 9 NetworkPolicy checks passed"
+echo "all 22 NetworkPolicy checks passed"

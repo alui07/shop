@@ -29,6 +29,11 @@
       "minimumReleaseAgeBehaviour": "timestamp-optional"
     },
     {
+      "description": "quay.io gives no release timestamps, so the 7-day gate would hold this image forever; treat the timestamp as optional",
+      "matchPackageNames": ["quay.io/keycloak/keycloak"],
+      "minimumReleaseAgeBehaviour": "timestamp-optional"
+    },
+    {
       "description": "The kindest/node digest must come from the kind release notes; bump it by hand together with KIND_VERSION",
       "matchPackageNames": ["kindest/node"],
       "enabled": false
@@ -46,7 +51,7 @@
     },
     {
       "description": "Cluster-breaking updates stay out of the general non-major PR; the cluster-e2e job gates them.",
-      "matchPackageNames": ["sigs.k8s.io/kind", "helm.sh/helm/v4", "docker.io/envoyproxy/gateway-helm", "cloudnative-pg", "ghcr.io/cloudnative-pg/postgresql", "projectcalico/calico", "registry.k8s.io/kubectl", "ghcr.io/yannh/kubeconform"],
+      "matchPackageNames": ["sigs.k8s.io/kind", "helm.sh/helm/v4", "docker.io/envoyproxy/gateway-helm", "cloudnative-pg", "ghcr.io/cloudnative-pg/postgresql", "projectcalico/calico", "registry.k8s.io/kubectl", "ghcr.io/yannh/kubeconform", "quay.io/keycloak/keycloak"],
       "groupName": "cluster platform"
     }
   ],

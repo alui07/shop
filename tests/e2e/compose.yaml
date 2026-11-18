@@ -15,6 +15,75 @@ services:
       timeout: 3s
       retries: 30
 
+  valkey:
+    image: ${VALKEY_IMAGE:?set by make}
+    command:
+      - sh
+      - -c
+      - exec valkey-server --requirepass "$$VALKEY_PASSWORD" --maxmemory 96mb --maxmemory-policy volatile-lru --save "" --appendonly no
+    environment:
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD:?run make secrets}
+    healthcheck:
+      test: ['CMD-SHELL', 'REDISCLI_AUTH="$$VALKEY_PASSWORD" valkey-cli ping | grep -q PONG']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  keycloak-db:
+    image: ${POSTGRES_IMAGE:?set by make}
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?run make secrets}
+    # tmpfs, so the realm is imported fresh on every run (--import-realm skips an existing realm)
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U keycloak -d keycloak']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  keycloak:
+    image: ${KEYCLOAK_DEV_IMAGE:?set by make}
+    pull_policy: never
+    entrypoint:
+      - bash
+      - -c
+      - |
+        : "$${SHOP_AUTH_CLIENT_SECRET:?}" "$${SHOP_PUBLIC_ORIGIN:?}" "$${SHOP_TEST_CUSTOMER_PASSWORD:?}" "$${SHOP_TEST_ADMIN_PASSWORD:?}"
+        exec /opt/keycloak/bin/kc.sh "$$@"
+      - kc
+    command: ['start', '--optimized', '--import-realm']
+    environment:
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?run make secrets}
+      KC_HOSTNAME: http://localhost:8089
+      KC_HTTP_ENABLED: 'true'
+      KC_CACHE: local
+      SHOP_PUBLIC_ORIGIN: http://localhost:8088
+      SHOP_AUTH_CLIENT_SECRET: ${SHOP_AUTH_CLIENT_SECRET:?run make secrets}
+      SHOP_TEST_CUSTOMER_PASSWORD: ${SHOP_TEST_CUSTOMER_PASSWORD:?run make secrets}
+      SHOP_TEST_ADMIN_PASSWORD: ${SHOP_TEST_ADMIN_PASSWORD:?run make secrets}
+      # Seconds. Short, so the id_token_hint test can sign out with an expired token; the runner reads the same value.
+      SHOP_ACCESS_TOKEN_LIFESPAN: ${SHOP_ACCESS_TOKEN_LIFESPAN:-10}
+    volumes:
+      - ../../deploy/k8s/overlays/local/keycloak/shop-users-0.json:/opt/keycloak/data/import/shop-users-0.json:ro
+    healthcheck:
+      # The image has no curl or wget: bash /dev/tcp against the management port. Compare the status line: a DOWN body still contains an "UP" check.
+      test:
+        - CMD-SHELL
+        - |-
+          exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && head -n1 <&3 | grep -q ' 200 '
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+
   api:
     image: ${API_IMAGE:?set by make}
     pull_policy: never
@@ -23,8 +92,17 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/shop
       SPRING_DATASOURCE_USERNAME: shop
       SPRING_DATASOURCE_PASSWORD: dev-only-postgres-password
+      SPRING_DATA_REDIS_HOST: valkey
+      SPRING_DATA_REDIS_PASSWORD: ${VALKEY_PASSWORD:?run make secrets}
+      SHOP_PUBLIC_ORIGIN: http://localhost:8088
+      SHOP_AUTH_ISSUER: http://localhost:8089/realms/shop
+      SHOP_AUTH_INTERNAL_REALM_URL: http://keycloak:8080/realms/shop
+      SHOP_AUTH_CLIENT_ID: shop-api
+      SHOP_AUTH_CLIENT_SECRET: ${SHOP_AUTH_CLIENT_SECRET:?run make secrets}
     depends_on:
       postgres:
+        condition: service_healthy
+      valkey:
         condition: service_healthy
     healthcheck:
       test:
@@ -52,6 +130,8 @@ services:
         condition: service_healthy
       web:
         condition: service_healthy
+      keycloak:
+        condition: service_healthy
     healthcheck:
       test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:8080/healthz']
       interval: 3s
@@ -70,6 +150,10 @@ services:
       HOME: /cache/home
       CI: 'true'
       E2E_UPSTREAM: gateway:8080
+      E2E_IDP_UPSTREAM: gateway:8089
+      E2E_ACCESS_TOKEN_LIFESPAN: ${SHOP_ACCESS_TOKEN_LIFESPAN:-10}
+      SHOP_TEST_CUSTOMER_PASSWORD: ${SHOP_TEST_CUSTOMER_PASSWORD:?run make secrets}
+      SHOP_TEST_ADMIN_PASSWORD: ${SHOP_TEST_ADMIN_PASSWORD:?run make secrets}
       E2E_REPORT_DIR: /reports
     volumes:
       - .:/e2e:ro

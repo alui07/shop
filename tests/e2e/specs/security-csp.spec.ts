@@ -1,13 +1,11 @@
 import { expect, test } from './support/test';
-import { collectBrowserDiagnostics, settle, type ConsoleError } from './support/csp';
+import {
+  collectBrowserDiagnostics,
+  isFailedLoadOf,
+  isInsecureOriginNotice,
+  settle,
+} from './support/csp';
 import { simulateCatalogOutage } from './support/catalog';
-
-// Chromium ignores COOP on plain http outside localhost; the test stack is http://gateway:8080.
-const isInsecureOriginNotice = (error: ConsoleError) =>
-  error.text.startsWith('The Cross-Origin-Opener-Policy header has been ignored');
-
-const isFailedLoadOf = (error: ConsoleError, status: number, urlPart: string) =>
-  error.text.includes(`status of ${status}`) && error.url.includes(urlPart);
 
 test('the collector sees a real violation, so zero elsewhere is meaningful', async ({ page }) => {
   const diagnostics = await collectBrowserDiagnostics(page);

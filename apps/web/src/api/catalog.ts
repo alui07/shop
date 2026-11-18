@@ -12,7 +12,7 @@ export class ApiError extends Error {
   }
 }
 
-function unwrap<T>(result: { data?: T; response: Response }): T {
+export function unwrap<T>(result: { data?: T; response: Response }): T {
   if (result.data === undefined) throw new ApiError(result.response.status);
   return result.data;
 }

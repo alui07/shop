@@ -4,11 +4,21 @@ import { pageWindow } from '@/lib/pageWindow';
 const ITEM_CLASS =
   'inline-flex h-9 min-w-9 items-center justify-center rounded-md border px-3 text-sm';
 
-function PageLink({ page, children }: { page: number; children: React.ReactNode }) {
+type PagedRoute = '/' | '/admin';
+
+function PageLink({
+  to,
+  page,
+  children,
+}: {
+  to: PagedRoute;
+  page: number;
+  children: React.ReactNode;
+}) {
   return (
     <Link
-      to="/"
-      search={(previous) => ({ ...previous, page: page === 1 ? undefined : page })}
+      to={to}
+      search={(previous: object) => ({ ...previous, page: page === 1 ? undefined : page })}
       className={`${ITEM_CLASS} hover:bg-accent`}
       activeOptions={{ exact: true }}
     >
@@ -25,10 +35,24 @@ function Disabled({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function Pagination({ page, totalPages }: { page: number; totalPages: number }) {
+export function Pagination({
+  to = '/',
+  page,
+  totalPages,
+}: {
+  to?: PagedRoute;
+  page: number;
+  totalPages: number;
+}) {
   return (
     <nav aria-label="Pagination" className="flex flex-wrap items-center justify-center gap-2">
-      {page > 1 ? <PageLink page={page - 1}>Previous</PageLink> : <Disabled>Previous</Disabled>}
+      {page > 1 ? (
+        <PageLink to={to} page={page - 1}>
+          Previous
+        </PageLink>
+      ) : (
+        <Disabled>Previous</Disabled>
+      )}
       {pageWindow(page, totalPages).map((number) =>
         number === page ? (
           <span
@@ -39,12 +63,18 @@ export function Pagination({ page, totalPages }: { page: number; totalPages: num
             {number}
           </span>
         ) : (
-          <PageLink key={number} page={number}>
+          <PageLink key={number} to={to} page={number}>
             {number}
           </PageLink>
         ),
       )}
-      {page < totalPages ? <PageLink page={page + 1}>Next</PageLink> : <Disabled>Next</Disabled>}
+      {page < totalPages ? (
+        <PageLink to={to} page={page + 1}>
+          Next
+        </PageLink>
+      ) : (
+        <Disabled>Next</Disabled>
+      )}
     </nav>
   );
 }

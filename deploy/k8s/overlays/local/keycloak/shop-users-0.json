@@ -1,0 +1,27 @@
+{
+  "realm": "shop",
+  "users": [
+    {
+      "username": "customer@example.test",
+      "email": "customer@example.test",
+      "emailVerified": true,
+      "firstName": "Test",
+      "lastName": "Customer",
+      "enabled": true,
+      "requiredActions": [],
+      "credentials": [{ "type": "password", "value": "${SHOP_TEST_CUSTOMER_PASSWORD}", "temporary": false }],
+      "realmRoles": ["customer"]
+    },
+    {
+      "username": "admin@example.test",
+      "email": "admin@example.test",
+      "emailVerified": true,
+      "firstName": "Test",
+      "lastName": "Admin",
+      "enabled": true,
+      "requiredActions": [],
+      "credentials": [{ "type": "password", "value": "${SHOP_TEST_ADMIN_PASSWORD}", "temporary": false }],
+      "realmRoles": ["customer", "admin"]
+    }
+  ]
+}

@@ -18,18 +18,17 @@ class ApiRequestFilterTest {
     private final ApiRequestFilter filter = new ApiRequestFilter();
 
     @Test
-    void addsNosniffAndLogsMethodPathStatusAndDuration(CapturedOutput output) throws Exception {
+    void logsMethodPathStatusAndDuration(CapturedOutput output) throws Exception {
         MockHttpServletResponse response = new MockHttpServletResponse();
         response.setStatus(204);
 
         filter.doFilter(new MockHttpServletRequest("GET", "/api/ping"), response, new MockFilterChain());
 
-        assertThat(response.getHeader("X-Content-Type-Options")).isEqualTo("nosniff");
         assertThat(output).containsPattern("GET /api/ping 204 \\d+ ms");
     }
 
     @Test
-    void stillLogsAndKeepsTheHeaderWhenTheChainFails(CapturedOutput output) {
+    void stillLogsWhenTheChainFails(CapturedOutput output) {
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain failing = new MockFilterChain() {
             @Override
@@ -42,7 +41,6 @@ class ApiRequestFilterTest {
         assertThatThrownBy(() -> filter.doFilter(new MockHttpServletRequest("POST", "/api/fail"), response, failing))
                 .isInstanceOf(ServletException.class);
 
-        assertThat(response.getHeader("X-Content-Type-Options")).isEqualTo("nosniff");
         assertThat(output).contains("POST /api/fail");
     }
 }

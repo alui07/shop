@@ -1,0 +1,95 @@
+{
+  "realm": "shop",
+  "displayName": "Shop",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "registrationEmailAsUsername": false,
+  "resetPasswordAllowed": false,
+  "rememberMe": false,
+  "verifyEmail": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 28800,
+  "accessTokenLifespan": "${SHOP_ACCESS_TOKEN_LIFESPAN:300}",
+  "revokeRefreshToken": true,
+  "refreshTokenMaxReuse": 0,
+  "defaultRole": {
+    "name": "default-roles-shop",
+    "description": "Default roles for the shop realm",
+    "composite": true,
+    "composites": {
+      "realm": ["customer"],
+      "client": {
+        "account": ["view-profile", "manage-account"]
+      }
+    }
+  },
+  "roles": {
+    "realm": [
+      { "name": "customer", "description": "A signed-in shopper" },
+      { "name": "admin", "description": "Manages products and stock" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "admin-cli",
+      "enabled": false,
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false
+    },
+    {
+      "clientId": "shop-api",
+      "name": "Shop API",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${SHOP_AUTH_CLIENT_SECRET}",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "consentRequired": false,
+      "frontchannelLogout": false,
+      "fullScopeAllowed": true,
+      "redirectUris": ["${SHOP_PUBLIC_ORIGIN}/login/oauth2/code/keycloak"],
+      "webOrigins": [],
+      "defaultClientScopes": ["basic", "profile", "email"],
+      "optionalClientScopes": [],
+      "attributes": {
+        "post.logout.redirect.uris": "${SHOP_PUBLIC_ORIGIN}/",
+        "pkce.code.challenge.method": "S256",
+        "backchannel.logout.url": "http://api:8080/logout/connect/back-channel/keycloak",
+        "backchannel.logout.session.required": "true",
+        "backchannel.logout.revoke.offline.tokens": "false",
+        "standard.token.exchange.enabled": "false",
+        "oauth2.device.authorization.grant.enabled": "false",
+        "use.refresh.tokens": "true"
+      },
+      "protocolMappers": [
+        {
+          "name": "realm roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "roles",
+            "multivalued": "true",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "false",
+            "userinfo.token.claim": "false",
+            "introspection.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ]
+}

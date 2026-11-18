@@ -13,7 +13,7 @@ class RequiredPropertiesCustomizerTest {
 
     @Test
     @SuppressWarnings({"rawtypes", "unchecked"})
-    void marksEveryNonNullablePropertyRequiredInSortedOrder() {
+    void marksEveryPropertyRequiredInSortedOrderIncludingNullableOnes() {
         Schema thing = new Schema<>();
         thing.addProperty("zeta", typed("string"));
         thing.addProperty("alpha", typed("integer"));
@@ -33,7 +33,7 @@ class RequiredPropertiesCustomizerTest {
 
         new RequiredPropertiesCustomizer().customise(openApi);
 
-        assertThat(thing.getRequired()).containsExactly("alpha", "middle", "zeta");
+        assertThat(thing.getRequired()).containsExactly("alpha", "flagNullable", "middle", "typeNullable", "zeta");
         assertThat(enumeration.getRequired()).isNull();
         assertThat(problem.getRequired()).isNull();
     }

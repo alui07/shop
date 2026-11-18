@@ -27,3 +27,48 @@ export function productPage(
 ): ProductPage {
   return { items, page, size: 12, totalItems, totalPages };
 }
+
+type Me = components['schemas']['Me'];
+type AdminProduct = components['schemas']['AdminProduct'];
+type AdminProductPage = components['schemas']['AdminProductPage'];
+
+export const anonymousMe: Me = {
+  authenticated: false,
+  email: null,
+  name: null,
+  roles: [],
+  subject: null,
+};
+export const customerMe: Me = {
+  authenticated: true,
+  email: 'casey@example.test',
+  name: 'Casey Customer',
+  roles: ['customer'],
+  subject: 'subject-customer',
+};
+export const adminMe: Me = {
+  authenticated: true,
+  email: 'ada@example.test',
+  name: 'Ada Admin',
+  roles: ['customer', 'admin'],
+  subject: 'subject-admin',
+};
+
+export function adminProduct(id: number, name: string, active = true): AdminProduct {
+  return {
+    id,
+    slug: name.toLowerCase().replaceAll(' ', '-'),
+    name,
+    description: `${name} description`,
+    price: { amountMinor: 12999, currency: 'EUR' },
+    category: chairs,
+    active,
+  };
+}
+
+export function adminProductPage(
+  items: AdminProduct[],
+  { page = 0, totalPages = 1, totalItems = items.length } = {},
+): AdminProductPage {
+  return { items, page, size: 20, totalItems, totalPages };
+}

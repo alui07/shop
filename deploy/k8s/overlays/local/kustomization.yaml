@@ -1,9 +1,18 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+namespace: shop
 resources:
   - ../../base
   - envoy-proxy.yaml
+configMapGenerator:
+  # The hash suffix changes with the content, so an edited users file rolls the Keycloak pod.
+  - name: keycloak-users
+    files:
+      - shop-users-0.json=keycloak/shop-users-0.json
 images:
+  - name: shop-keycloak
+    newName: shop/keycloak
+    newTag: dev
   - name: shop-api
     newName: shop/api
     newTag: dev
@@ -38,6 +47,8 @@ patches:
           metadata:
             annotations:
               shop.dev/image-id: api-image-id-placeholder
+              shop.dev/shop-auth-hash: shop-auth-hash-placeholder
+              shop.dev/valkey-auth-hash: valkey-auth-hash-placeholder
           spec:
             containers:
               - name: api
@@ -45,6 +56,25 @@ patches:
                 env:
                   - name: SPRING_PROFILES_ACTIVE
                     value: seed
+                  - name: SHOP_PUBLIC_ORIGIN
+                    value: http://localhost:8088
+                  - name: SHOP_AUTH_ISSUER
+                    value: http://localhost:8089/realms/shop
+                  - name: SHOP_AUTH_INTERNAL_REALM_URL
+                    value: http://keycloak:8080/realms/shop
+  - target:
+      kind: Deployment
+      name: valkey
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: valkey
+      spec:
+        template:
+          metadata:
+            annotations:
+              shop.dev/valkey-auth-hash: valkey-auth-hash-placeholder
   - target:
       kind: Deployment
       name: web
@@ -62,3 +92,54 @@ patches:
             containers:
               - name: web
                 imagePullPolicy: Never
+  - target:
+      kind: Deployment
+      name: keycloak
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: keycloak
+      spec:
+        template:
+          metadata:
+            annotations:
+              shop.dev/image-id: keycloak-image-id-placeholder
+              shop.dev/shop-auth-hash: shop-auth-hash-placeholder
+              shop.dev/keycloak-test-users-hash: keycloak-test-users-hash-placeholder
+          spec:
+            initContainers:
+              - name: import
+                imagePullPolicy: Never
+                command:
+                  - bash
+                  - -c
+                  - ': "${SHOP_AUTH_CLIENT_SECRET:?}" "${SHOP_PUBLIC_ORIGIN:?}" "${SHOP_TEST_CUSTOMER_PASSWORD:?}" "${SHOP_TEST_ADMIN_PASSWORD:?}"; exec /opt/keycloak/bin/kc.sh import --dir /opt/keycloak/data/import --override true --optimized'
+                env:
+                  - name: SHOP_PUBLIC_ORIGIN
+                    value: http://localhost:8088
+                  - name: SHOP_TEST_CUSTOMER_PASSWORD
+                    valueFrom:
+                      secretKeyRef:
+                        name: keycloak-test-users
+                        key: SHOP_TEST_CUSTOMER_PASSWORD
+                  - name: SHOP_TEST_ADMIN_PASSWORD
+                    valueFrom:
+                      secretKeyRef:
+                        name: keycloak-test-users
+                        key: SHOP_TEST_ADMIN_PASSWORD
+                volumeMounts:
+                  - name: users
+                    mountPath: /opt/keycloak/data/import/shop-users-0.json
+                    subPath: shop-users-0.json
+                    readOnly: true
+            containers:
+              - name: keycloak
+                imagePullPolicy: Never
+                env:
+                  - name: KC_HOSTNAME
+                    value: http://localhost:8089
+            volumes:
+              - name: users
+                configMap:
+                  name: keycloak-users

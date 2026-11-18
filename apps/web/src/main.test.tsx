@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { categories, oakChair, productPage } from '@/test/fixtures';
+import { anonymousMe, categories, oakChair, productPage } from '@/test/fixtures';
 import { jsonResponse, stubFetch } from '@/test/fetchStub';
 
 beforeEach(() => {
   vi.resetModules();
   stubFetch({
+    '/api/me': () => jsonResponse(anonymousMe),
     '/api/categories': () => jsonResponse(categories),
     '/api/products': () => jsonResponse(productPage([oakChair])),
   });

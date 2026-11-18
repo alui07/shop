@@ -6,5 +6,9 @@ resources:
   - api.yaml
   - web.yaml
   - postgres.yaml
+  - keycloak-db.yaml
+  - valkey.yaml
+  - keycloak.yaml
   - gateway.yaml
   - network-policies.yaml
+  - network-policies-auth.yaml
