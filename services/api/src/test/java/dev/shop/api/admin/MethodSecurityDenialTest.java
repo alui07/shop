@@ -63,7 +63,6 @@ class MethodSecurityDenialTest {
         @Bean
         SecurityFilterChain permitEverything(HttpSecurity http) {
             return http.authorizeHttpRequests(requests -> requests.anyRequest().permitAll())
-                    .csrf(csrf -> csrf.disable())
                     .build();
         }
     }
