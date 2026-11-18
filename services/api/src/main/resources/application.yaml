@@ -7,10 +7,15 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD:}
   flyway:
     ignore-migration-patterns: "*:future,repeatable:missing"
+    connect-retries: 12
+    connect-retries-interval: 10s
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
 
 server:
   port: 8080
   shutdown: graceful
+  forward-headers-strategy: native
 
 springdoc:
   api-docs:

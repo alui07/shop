@@ -1,4 +1,5 @@
-import { expect, type Locator, type Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
+import { expect } from './test';
 
 export function productCards(page: Page): Locator {
   return page.getByRole('article');

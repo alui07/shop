@@ -24,6 +24,26 @@ Checks that cannot be automated here. Each has the reason, the steps, the expect
   - Steps: run `make e2e` locally, once with a cold cache and once again.
   - Expected: both runs pass and `docker ps` shows no leftover `shop-e2e` containers afterwards.
 
+## Kubernetes (kind)
+
+- [ ] **Cluster smoke, rollouts, policies and cleanup (after changes under `deploy/`)**
+  - Why manual: it needs a person watching a browser, rollouts and timing.
+  - Steps:
+    1. `make cluster-up deploy`. Browse http://localhost:8088: catalog, a product, `/status`. The browser console shows no CSP violations.
+    2. Run `make deploy` again with nothing changed. Pod ages stay the same (`make kubectl ARGS="-n shop get pods"`). Change a visible string in the web app and run `make deploy`: only `web` rolls. Revert the change.
+    3. Zero-drop rollout: in terminal A run `make cluster-traffic`. In terminal B run `make kubectl ARGS="-n shop rollout restart deploy/api"`, then `make kubectl ARGS="-n shop rollout status deploy/api"`. Terminal A must print no `FAIL`. Repeat for `web`.
+    4. Database outage: `make kubectl ARGS="-n shop delete pod shop-db-1"`. `/status` shows the API unavailable, then recovers without a reload once CNPG restarts the instance.
+    5. Pod Security: `make kubectl ARGS="-n shop run pss-check --image=busybox --restart=Never -- id"` is rejected by `restricted`.
+    6. `make kubectl ARGS="-n shop get networkpolicy"` lists the seven policies. `make kubectl ARGS="get pods -A"` shows Calico, Envoy Gateway and CNPG running.
+    7. Memory: `docker stats shop-control-plane --no-stream`; compare with the figure in `README.md`.
+    8. `make cluster-down`. `docker ps` shows no `shop-control-plane`.
+  - Expected: every step behaves as described.
+
+- [ ] **`cluster-e2e` job passes on the first pull request**
+  - Why manual: the job has never run on a GitHub runner.
+  - Steps: open the pull request and watch the `cluster-e2e` job next to `ci`.
+  - Expected: both pass. Record the job's duration in `docs/plans/STATUS.md`.
+
 ## After the first push to GitHub
 
 - [ ] **Pull request workflow is green on a Linux runner**
@@ -72,7 +92,7 @@ Checks that cannot be automated here. Each has the reason, the steps, the expect
   - Why manual: e2e checks for violations, but only a person sees what a real browser reports. The Vite dev server (`make dev`) does not enforce the CSP, so it cannot be used for this.
   - Steps: run `make build`. Start the built web image on a loopback port: `docker run --rm -p 127.0.0.1:8081:8080 shop/web:dev` (the web image listens on 8080). Open http://127.0.0.1:8081, then open dev tools: Network, click the document request, and read the response headers (`Content-Security-Policy`, `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options`, `Cross-Origin-Opener-Policy`, `Permissions-Policy`; no `Strict-Transport-Security`). Open the Console and reload, and click through `/status` and a deep link such as `/products/x`. Optionally request a missing file, `/assets/missing.js`, and expect a 404 and not the app page.
   - Expected: all headers present, no CSP violation messages in the Console. Stop the container with Ctrl+C.
-  - What this does and does not show: it proves the built image sends the policy and that the page loads under it. This container has no API behind it (the web image does not proxy `/api`), so catalog data requests fail and the app shows its error state; that is expected here and exercises only the error screen. The data flows under the CSP are covered by `make e2e`, whose stack publishes no ports. To see catalog pages under the CSP in your own browser you would need the Gateway of slice 2.
+  - What this does and does not show: it proves the built image sends the policy and that the page loads under it. This container has no API behind it (the web image does not proxy `/api`), so catalog data requests fail and the app shows its error state; that is expected here and exercises only the error screen. The data flows under the CSP are covered by `make e2e`, whose stack publishes no ports. To see catalog pages under the CSP in your own browser use the kind cluster (see Kubernetes (kind) below).
 
 - [ ] **Catalog with keyboard only (each time the UI changes)**
   - Why manual: axe cannot judge whether the tab order and focus feel right.

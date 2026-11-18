@@ -1,0 +1,21 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: shop
+networking:
+  apiServerAddress: 127.0.0.1
+  disableDefaultCNI: true
+  kubeProxyMode: iptables
+  podSubnet: 10.244.0.0/16
+  serviceSubnet: 10.96.0.0/16
+nodes:
+  - role: control-plane
+    # Kubelet 1.36 refuses cgroup v1 hosts (Docker Desktop on some setups); a no-op on cgroup v2
+    kubeadmConfigPatches:
+      - |
+        kind: KubeletConfiguration
+        failCgroupV1: false
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 8088
+        listenAddress: 127.0.0.1
+        protocol: TCP

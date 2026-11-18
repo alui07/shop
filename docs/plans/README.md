@@ -16,10 +16,10 @@ A brief is named `slice-N-brief.md` for a slice, or `slice-N-<topic>-brief.md` f
 ## Process per slice
 
 1. Read the code, check versions against registries and docs, and write the brief.
-2. A separate reviewer challenges the brief. Accepted findings are appended to the brief as amendments; the body is not rewritten.
+2. A separate, fresh agent challenges the brief. High-risk slices (3, 4, 6) also get a second challenger with a security and failure-mode lens. Accepted findings are appended to the brief as amendments; the body is not rewritten.
 3. Implementers work in parallel on non-overlapping files, each verifying with real commands in containers.
 4. The integrated checks run (`make ci`, and `make dev` where relevant).
-5. Two fresh reviewers look at the diff independently. Findings are fixed and resubmitted until both approve.
+5. A fresh reviewer looks at the diff. Findings are fixed and resubmitted until it approves. Slices 3, 4 and 6 add a security-only reviewer, and both must approve. (Slices 0 and 1 used two reviewers.)
 6. The result and the reviewers' findings and resolutions are reported. The owner runs all git commands.
 
 ## Keeping STATUS.md current

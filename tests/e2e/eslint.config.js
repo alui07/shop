@@ -10,4 +10,23 @@ export default defineConfig(
   {
     languageOptions: { globals: globals.node },
   },
+  {
+    files: ['specs/**/*.ts'],
+    ignores: ['specs/support/test.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '@playwright/test',
+              importNames: ['test', 'expect'],
+              message:
+                'Import test and expect from the support test module (specs/support/test.ts).',
+            },
+          ],
+        },
+      ],
+    },
+  },
 );

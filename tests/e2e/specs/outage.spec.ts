@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './support/test';
 import { productCards, simulateCatalogOutage } from './support/catalog';
 
 // Both outages are simulated in the browser with page.route. The API container keeps running;
