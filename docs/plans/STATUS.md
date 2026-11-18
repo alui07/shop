@@ -182,7 +182,7 @@ Started 2026-11-17. Owner decisions: cluster e2e runs in CI as a separate parall
 | Implementation: K8S, PLATFORM, E2E and DOCS agents in parallel | done. Live run fixed three K8S issues: kubelet 1.36 refuses cgroup v1 (Docker Desktop here; `failCgroupV1: false`), calico-node `/sys/kernel/security` mount on a read-only sysfs (removed by patch), EnvoyProxy in `default` instead of `shop`. K8S agent then ran `cluster-up deploy cluster-smoke cluster-e2e` green: 40 Playwright, 9 of 9 NetworkPolicy checks |
 | Integrated `make lint`, `make ci`, `make cluster-up deploy cluster-e2e` by orchestrator | done: `make lint` and `make ci` pass (API 58 integration, web 88, both 100%; scans clean; 40 compose e2e). `make cluster-down cluster-up deploy cluster-smoke cluster-e2e` passes from scratch in 217 s (40 Playwright, 9 of 9 NetworkPolicy checks). A second `make deploy` left api, web and shop-db-1 pods unchanged (B1 confirmed) |
 | Review | round 1: request changes (4 should-fix, 7 nits), all fixed and re-verified (`make lint`, `make ci` with 42 compose e2e, cluster from scratch in 220 s with 42 Playwright and 9 of 9 NetworkPolicy checks, rerun of `cluster-up deploy` skips both Helm releases and restarts no pods). Round 2: request changes (1 should-fix: ADR 0005 overstated Docker socket scope; 7 nits), fixed and re-verified (lint, ci, cluster from scratch). Approved in round 3 (only deferrable nits) |
-| Owner commits and opens the PR; first `cluster-e2e` CI run | next |
+| Owner commits and opens the PR; first `cluster-e2e` CI run | done: PR #2 opened 2026-11-18. First run green on ubuntu-24.04 (cgroup v2): `cluster-e2e` 6 min 8 s (42 Playwright, 9 of 9 NetworkPolicy checks), `ci` 4 min 34 s, CodeQL 1 min 14 s. Awaiting owner merge |
 
 ### Slice 2 review round 1: findings and resolutions (all fixed)
 
@@ -204,4 +204,4 @@ Started 2026-11-17. Owner decisions: cluster e2e runs in CI as a separate parall
 - `tests/e2e/specs/routing.spec.ts:7` hardcodes `http://localhost:8088`; import `frontDoorOrigin`.
 - Calico images and the Envoy Gateway and CNPG charts are pinned by tag or version, not digest; revisit in slice 6.
 - Renovate can bump kind without its `kindest/node` digest (the node image rule is disabled); add a PR note or disable kind too. `cluster-e2e` would catch a real incompatibility.
-- Not yet exercised: the `cluster-e2e` job on GitHub `ubuntu-24.04` (cgroup v2). Record its duration after the first run.
+- Done: the `cluster-e2e` job passed on GitHub `ubuntu-24.04` (cgroup v2) in 6 min 8 s on its first run.
