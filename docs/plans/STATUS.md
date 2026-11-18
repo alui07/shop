@@ -168,7 +168,7 @@ Started 2026-11-17. The owner asked to run until the daily usage limit; this tab
 
 ## Next
 
-Slices 1 and 2 are merged (PR #1, PR #2). The repo `CLAUDE.md` is on branch `docs-repo-claude-md`, awaiting its PR merge. Then slice 3 (auth): branch `slice-3-auth` from an up-to-date `main`, and write `slice-3-brief.md` here first, following the process in `CLAUDE.md` (two challengers and two reviewers for this slice).
+Slices 1 and 2 and the repo `CLAUDE.md` are merged (PR #1, #2, #3). Slice 3 is in progress; see its section at the end.
 
 ## Slice 2: deploy slice 1 to kind (brief: `slice-2-brief.md`, branch `slice-2-kind-deploy`)
 
@@ -214,10 +214,26 @@ Started 2026-11-17. Writes the repo-root `CLAUDE.md` described in `master-plan.m
 |---|---|
 | `CLAUDE.md` written from `master-plan.md`, this file, `docs/plans/README.md`, `README.md` and the coverage-exclusion decision | done (70 lines) |
 | Review | round 1: request changes (2 should-fix, 3 nits), all fixed. Approved in round 2 |
-| Owner commits and pushes | `CLAUDE.md` committed (`0735d73`) and pushed; this `STATUS.md` update follows in a second commit. PR not yet opened |
+| Owner commits and pushes | done: merged into `main` as PR #3 (`aaae365`) |
 
 ### Review round 1: findings and resolutions (all fixed)
 
 - Said `make lint` catches all stale generated files (should-fix): lint catches the web client and route tree; a stale `openapi.json` fails `OpenApiContractIT` in `make test`.
 - Said `make ci` is everything the PR workflow runs (should-fix): CI also runs `make cluster-up deploy cluster-e2e` as a second job, so the integration step now runs the cluster targets whenever app, deploy or e2e code changes.
 - Nits fixed: Vite 8 plugin compatibility added to the traps; hand-bumped pins in `deploy/versions.mk` (`kindest/node` digest, schema refs) called out; coverage gates stated per app (API line and branch; web lines, branches, functions, statements).
+
+## Slice 3: auth (brief: `slice-3-brief.md`, branch `slice-3-auth`)
+
+Started 2026-11-17. High-risk slice: two independent challengers (general; security and failure-mode) and two reviewers (general; security-only), per `CLAUDE.md`.
+
+| Step | State |
+|---|---|
+| Brief written | done (229 lines). Versions read 2026-11-17; owner decisions D1 to D10 listed in the brief |
+| Design challenge (general) | done: 1 blocker (work split not file-disjoint: Makefile, ci.yaml, diagnostics.sh), 11 should-fix, 8 nits; not yet folded in |
+| Design challenge (security and failure-mode) | done: 1 blocker (back-channel logout and role revocation lapse after Keycloak's 30-min SSO idle), 10 should-fix, 9 nits; not yet folded in |
+| Amendments folded into the brief; owner decisions | owner decisions taken 2026-11-17: D1 to D10 as recommended, plus the security challenger's adjustments (D5 gate CRITICAL with expiring ignores, HIGH reported until slice 6; D8 anonymous 401, authenticated 403; D9 JEP 290 `ObjectInputFilter` allowlist; D4 fail-fast placeholders and per-container env); D11 = revalidate with Keycloak every 5 min of activity (refresh, re-map roles, fail closed on `invalid_grant`, single refresh per session). D3 kept, with `strategy: Recreate`. D12 = scoped `timestamp-optional` Renovate rule for `quay.io/keycloak/keycloak` (as for Playwright). D13 = two PRs: 3a (Keycloak in all stacks, BFF login/logout, sessions, CSRF, `/api/me`, one admin read endpoint) on `slice-3-auth`, then 3b (admin writes, stock, audit, admin forms) on a new branch. Rationale doc: https://claude.ai/artifact/5UfXP9VaCRhDCzmkWAZJcM. Amendments not yet folded in |
+| Implementation | not started |
+| Integrated `make ci` and `make cluster-up deploy cluster-e2e` | not started |
+| Review (general) | not started |
+| Review (security-only) | not started |
+| Owner commits and opens the PR | not started |
