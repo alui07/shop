@@ -168,7 +168,7 @@ Started 2026-11-17. The owner asked to run until the daily usage limit; this tab
 
 ## Next
 
-Slice 1 is merged (PR #1). Next is slice 2 (deploy slice 1 to kind): write `slice-2-brief.md` here first. Before slice 3, create the repo-specific `CLAUDE.md` described in `master-plan.md` ("Repo-specific `CLAUDE.md`"): one design challenger per slice with a second, security and failure-mode challenger for slices 3, 4 and 6 (decided 2026-11-17); a second, security-only reviewer for slices 3, 4 and 6; and the standing agent rules. Planned branch: `docs-repo-claude-md`.
+Slices 1 and 2 are merged (PR #1, PR #2). The repo `CLAUDE.md` is on branch `docs-repo-claude-md`, awaiting its PR merge. Then slice 3 (auth): branch `slice-3-auth` from an up-to-date `main`, and write `slice-3-brief.md` here first, following the process in `CLAUDE.md` (two challengers and two reviewers for this slice).
 
 ## Slice 2: deploy slice 1 to kind (brief: `slice-2-brief.md`, branch `slice-2-kind-deploy`)
 
@@ -182,7 +182,7 @@ Started 2026-11-17. Owner decisions: cluster e2e runs in CI as a separate parall
 | Implementation: K8S, PLATFORM, E2E and DOCS agents in parallel | done. Live run fixed three K8S issues: kubelet 1.36 refuses cgroup v1 (Docker Desktop here; `failCgroupV1: false`), calico-node `/sys/kernel/security` mount on a read-only sysfs (removed by patch), EnvoyProxy in `default` instead of `shop`. K8S agent then ran `cluster-up deploy cluster-smoke cluster-e2e` green: 40 Playwright, 9 of 9 NetworkPolicy checks |
 | Integrated `make lint`, `make ci`, `make cluster-up deploy cluster-e2e` by orchestrator | done: `make lint` and `make ci` pass (API 58 integration, web 88, both 100%; scans clean; 40 compose e2e). `make cluster-down cluster-up deploy cluster-smoke cluster-e2e` passes from scratch in 217 s (40 Playwright, 9 of 9 NetworkPolicy checks). A second `make deploy` left api, web and shop-db-1 pods unchanged (B1 confirmed) |
 | Review | round 1: request changes (4 should-fix, 7 nits), all fixed and re-verified (`make lint`, `make ci` with 42 compose e2e, cluster from scratch in 220 s with 42 Playwright and 9 of 9 NetworkPolicy checks, rerun of `cluster-up deploy` skips both Helm releases and restarts no pods). Round 2: request changes (1 should-fix: ADR 0005 overstated Docker socket scope; 7 nits), fixed and re-verified (lint, ci, cluster from scratch). Approved in round 3 (only deferrable nits) |
-| Owner commits and opens the PR; first `cluster-e2e` CI run | done: PR #2 opened 2026-11-18. First run green on ubuntu-24.04 (cgroup v2): `cluster-e2e` 6 min 8 s (42 Playwright, 9 of 9 NetworkPolicy checks), `ci` 4 min 34 s, CodeQL 1 min 14 s. Awaiting owner merge |
+| Owner commits and opens the PR; first `cluster-e2e` CI run | done: PR #2 opened 2026-11-18. First run green on ubuntu-24.04 (cgroup v2): `cluster-e2e` 6 min 8 s (42 Playwright, 9 of 9 NetworkPolicy checks), `ci` 4 min 34 s, CodeQL 1 min 14 s. Merged into `main` as PR #2 (`24ddfd0`) |
 
 ### Slice 2 review round 1: findings and resolutions (all fixed)
 
@@ -205,3 +205,19 @@ Started 2026-11-17. Owner decisions: cluster e2e runs in CI as a separate parall
 - Calico images and the Envoy Gateway and CNPG charts are pinned by tag or version, not digest; revisit in slice 6.
 - Renovate can bump kind without its `kindest/node` digest (the node image rule is disabled); add a PR note or disable kind too. `cluster-e2e` would catch a real incompatibility.
 - Done: the `cluster-e2e` job passed on GitHub `ubuntu-24.04` (cgroup v2) in 6 min 8 s on its first run.
+
+## Repo CLAUDE.md (branch `docs-repo-claude-md`)
+
+Started 2026-11-17. Writes the repo-root `CLAUDE.md` described in `master-plan.md` ("Repo-specific `CLAUDE.md`"). Documentation only, so one reviewer and no design challenge.
+
+| Step | State |
+|---|---|
+| `CLAUDE.md` written from `master-plan.md`, this file, `docs/plans/README.md`, `README.md` and the coverage-exclusion decision | done (70 lines) |
+| Review | round 1: request changes (2 should-fix, 3 nits), all fixed. Approved in round 2 |
+| Owner commits and pushes | `CLAUDE.md` committed (`0735d73`) and pushed; this `STATUS.md` update follows in a second commit. PR not yet opened |
+
+### Review round 1: findings and resolutions (all fixed)
+
+- Said `make lint` catches all stale generated files (should-fix): lint catches the web client and route tree; a stale `openapi.json` fails `OpenApiContractIT` in `make test`.
+- Said `make ci` is everything the PR workflow runs (should-fix): CI also runs `make cluster-up deploy cluster-e2e` as a second job, so the integration step now runs the cluster targets whenever app, deploy or e2e code changes.
+- Nits fixed: Vite 8 plugin compatibility added to the traps; hand-bumped pins in `deploy/versions.mk` (`kindest/node` digest, schema refs) called out; coverage gates stated per app (API line and branch; web lines, branches, functions, statements).
