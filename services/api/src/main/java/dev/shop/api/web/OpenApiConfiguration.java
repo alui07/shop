@@ -15,20 +15,34 @@ class OpenApiConfiguration {
     OpenAPI shopOpenApi() {
         return new OpenAPI()
                 .info(new Info().title("Shop API").version("1"))
-                .components(new Components()
-                        .addSecuritySchemes(
-                                "sessionCookie",
-                                new SecurityScheme()
-                                        .type(SecurityScheme.Type.APIKEY)
-                                        .in(SecurityScheme.In.COOKIE)
-                                        .name("__Host-SESSION")
-                                        .description(
-                                                "Server-side session cookie set after the OpenID Connect login.")));
+                .components(
+                        new Components()
+                                .addSecuritySchemes(
+                                        "sessionCookie",
+                                        new SecurityScheme()
+                                                .type(SecurityScheme.Type.APIKEY)
+                                                .in(SecurityScheme.In.COOKIE)
+                                                .name("__Host-SESSION")
+                                                .description(
+                                                        "Server-side session cookie set after the OpenID Connect login."))
+                                .addSecuritySchemes(
+                                        "csrfHeader",
+                                        new SecurityScheme()
+                                                .type(SecurityScheme.Type.APIKEY)
+                                                .in(SecurityScheme.In.HEADER)
+                                                .name("X-XSRF-TOKEN")
+                                                .description(
+                                                        "The value of the __Host-XSRF-TOKEN cookie; required on every unsafe request.")));
     }
 
     @Bean
     OpenApiCustomizer requiredPropertiesCustomizer() {
         return new RequiredPropertiesCustomizer();
+    }
+
+    @Bean
+    OpenApiCustomizer csrfHeaderCustomizer() {
+        return new CsrfHeaderCustomizer();
     }
 
     @Bean

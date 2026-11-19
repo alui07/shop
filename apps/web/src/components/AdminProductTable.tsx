@@ -1,4 +1,5 @@
 import type { components } from '@/api/schema';
+import { Link } from '@tanstack/react-router';
 import { formatPrice } from '@/lib/price';
 
 type AdminProduct = components['schemas']['AdminProduct'];
@@ -21,6 +22,9 @@ export function AdminProductTable({ products }: { products: readonly AdminProduc
           <th scope="col" className="py-2 pr-4">
             Price
           </th>
+          <th scope="col" className="py-2 pr-4">
+            Stock
+          </th>
           <th scope="col" className="py-2">
             Status
           </th>
@@ -30,11 +34,18 @@ export function AdminProductTable({ products }: { products: readonly AdminProduc
         {products.map((product) => (
           <tr key={product.id} className="border-b">
             <th scope="row" className="py-2 pr-4 font-medium">
-              {product.name}
+              <Link
+                to="/admin/products/$id"
+                params={{ id: String(product.id) }}
+                className="underline"
+              >
+                {product.name}
+              </Link>
             </th>
             <td className="py-2 pr-4">{product.slug}</td>
             <td className="py-2 pr-4">{product.category.name}</td>
             <td className="py-2 pr-4">{formatPrice(product.price)}</td>
+            <td className="py-2 pr-4">{product.stock.onHand}</td>
             <td className="py-2">
               <span
                 className={

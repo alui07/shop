@@ -68,7 +68,8 @@ class SecurityConfiguration {
                 properties,
                 new IdentityRefresher(authorizedClients, refreshTokenClient, idTokenDecoders),
                 redis,
-                csrfTokens);
+                csrfTokens,
+                problems);
 
         http.authorizeHttpRequests(requests -> {
                     requests.dispatcherTypeMatchers(DispatcherType.ERROR).permitAll();

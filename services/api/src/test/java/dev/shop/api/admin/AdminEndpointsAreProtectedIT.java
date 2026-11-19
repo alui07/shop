@@ -2,7 +2,13 @@ package dev.shop.api.admin;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import dev.shop.api.catalog.ProductAdministration;
+import dev.shop.api.inventory.StockManagement;
 import dev.shop.api.support.IntegrationTest;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.util.Arrays;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -31,6 +37,39 @@ class AdminEndpointsAreProtectedIT {
         assertThat(adminHandlers)
                 .allSatisfy(handler ->
                         assertThat(isAdminOnly(handler)).as(handler.toString()).isTrue());
+    }
+
+    @Test
+    void everyPublicMethodOfTheAdminServicesAndTheAdministrationApisRequiresTheAdminRole() {
+        assertThat(publicMethodsOf(AdminProductService.class))
+                .isNotEmpty()
+                .allSatisfy(AdminEndpointsAreProtectedIT::assertAdminOnly);
+        assertThat(publicMethodsOf(AuditLog.class))
+                .isNotEmpty()
+                .allSatisfy(AdminEndpointsAreProtectedIT::assertAdminOnly);
+        assertThat(publicMethodsOf(ProductAdministration.class))
+                .isNotEmpty()
+                .allSatisfy(AdminEndpointsAreProtectedIT::assertAdminOnly);
+        assertThat(publicMethodsOf(StockManagement.class))
+                .filteredOn(method ->
+                        method.getName().equals("setOnHand") || method.getName().equals("createFor"))
+                .hasSize(2)
+                .allSatisfy(AdminEndpointsAreProtectedIT::assertAdminOnly);
+    }
+
+    private static List<Method> publicMethodsOf(Class<?> type) {
+        return Arrays.stream(type.getDeclaredMethods())
+                .filter(method -> Modifier.isPublic(method.getModifiers()) && !method.isSynthetic())
+                .toList();
+    }
+
+    private static void assertAdminOnly(Method method) {
+        PreAuthorize annotation = AnnotatedElementUtils.findMergedAnnotation(method, PreAuthorize.class);
+        if (annotation == null) {
+            annotation = AnnotatedElementUtils.findMergedAnnotation(method.getDeclaringClass(), PreAuthorize.class);
+        }
+        assertThat(annotation).as(method.toString()).isNotNull();
+        assertThat(annotation.value()).as(method.toString()).isEqualTo("hasRole('ADMIN')");
     }
 
     private static boolean isAdminOnly(HandlerMethod handler) {

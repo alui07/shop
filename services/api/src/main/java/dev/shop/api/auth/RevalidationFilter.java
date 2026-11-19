@@ -9,12 +9,17 @@ import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Set;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.security.web.csrf.CsrfTokenRepository;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
@@ -25,6 +30,9 @@ import org.springframework.web.filter.OncePerRequestFilter;
  */
 final class RevalidationFilter extends OncePerRequestFilter {
 
+    private static final RequestMatcher ADMIN_PATHS =
+            PathPatternRequestMatcher.withDefaults().matcher("/api/admin/**");
+    private static final Set<String> SAFE_METHODS = Set.of("GET", "HEAD", "OPTIONS", "TRACE");
     private static final String LOCK_KEY = "shop:revalidate:";
     /** Longer than a worst-case refresh plus key fetch, and long enough for Spring Session to commit the result. */
     private static final Duration LOCK_TIME_TO_LIVE = Duration.ofSeconds(20);
@@ -34,6 +42,7 @@ final class RevalidationFilter extends OncePerRequestFilter {
     private final IdentityRefresher refresher;
     private final StringRedisTemplate redis;
     private final CsrfTokenRepository csrfTokens;
+    private final ProblemResponses problems;
     private final HttpSessionSecurityContextRepository contexts = new HttpSessionSecurityContextRepository();
 
     RevalidationFilter(
@@ -41,12 +50,14 @@ final class RevalidationFilter extends OncePerRequestFilter {
             ShopAuthProperties properties,
             IdentityRefresher refresher,
             StringRedisTemplate redis,
-            CsrfTokenRepository csrfTokens) {
+            CsrfTokenRepository csrfTokens,
+            ProblemResponses problems) {
         this.clock = clock;
         this.properties = properties;
         this.refresher = refresher;
         this.redis = redis;
         this.csrfTokens = csrfTokens;
+        this.problems = problems;
     }
 
     @Override
@@ -60,7 +71,31 @@ final class RevalidationFilter extends OncePerRequestFilter {
                 && Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(lockKey(session), "1", LOCK_TIME_TO_LIVE))) {
             revalidate(context, current, session, request, response);
         }
+        if (isAdminWriteWithoutFreshConfirmation(request)) {
+            response.setHeader(
+                    HttpHeaders.RETRY_AFTER,
+                    String.valueOf(properties.revalidateAfter().toSeconds()));
+            problems.write(response, HttpStatus.SERVICE_UNAVAILABLE, "Your access cannot be confirmed right now");
+            return;
+        }
         chain.doFilter(request, response);
+    }
+
+    /**
+     * Reads ride out a Keycloak outage for the whole grace period; an admin write does not: it needs a confirmation
+     * (login or a successful refresh) no older than {@code revalidateAfter}. A session ended above has no
+     * authentication left, so it falls through to the 401.
+     */
+    private boolean isAdminWriteWithoutFreshConfirmation(HttpServletRequest request) {
+        if (!(SecurityContextHolder.getContext().getAuthentication() instanceof OAuth2AuthenticationToken)
+                || SAFE_METHODS.contains(request.getMethod())
+                || !ADMIN_PATHS.matches(request)) {
+            return false;
+        }
+        HttpSession session = request.getSession(false);
+        Instant lastSuccess =
+                session == null ? null : (Instant) session.getAttribute(SessionAttributes.LAST_REVALIDATION_SUCCESS);
+        return lastSuccess == null || !lastSuccess.isAfter(clock.instant().minus(properties.revalidateAfter()));
     }
 
     /**

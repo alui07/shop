@@ -3,6 +3,7 @@ package dev.shop.api.auth;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.lettuce.core.RedisCommandTimeoutException;
 import jakarta.servlet.ServletException;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.QueryTimeoutException;
@@ -33,13 +34,21 @@ class ValkeyFailureFilterTest {
             @Override
             public void doFilter(jakarta.servlet.ServletRequest request, jakarta.servlet.ServletResponse res)
                     throws ServletException {
-                throw new ServletException("Request processing failed", new QueryTimeoutException("slow"));
+                throw new ServletException(
+                        "Request processing failed",
+                        new QueryTimeoutException("slow", new RedisCommandTimeoutException("Command timed out")));
             }
         };
 
         filter.doFilter(new MockHttpServletRequest(), response, failing);
 
         assertThat(response.getStatus()).isEqualTo(503);
+    }
+
+    @Test
+    void aQueryTimeoutThatDidNotComeFromValkeyIsNotHidden() {
+        assertThatThrownBy(() -> run(new QueryTimeoutException("slow", new java.sql.SQLTimeoutException("lock"))))
+                .isInstanceOf(QueryTimeoutException.class);
     }
 
     @Test

@@ -55,7 +55,18 @@ test('a signed-in unsafe request needs a valid CSRF token', async ({ page }) => 
   expect(adminWrite.status).toBe(403);
   expect(JSON.parse(adminWrite.body)).toMatchObject({ detail: 'CSRF token missing or invalid' });
 
+  const adminUpdate = await apiFetch(page, '/api/admin/products/1', { method: 'PUT', json: {} });
+  expect(adminUpdate.status).toBe(403);
+  expect(JSON.parse(adminUpdate.body)).toMatchObject({ detail: 'CSRF token missing or invalid' });
+
   expect((await fetchMe(page)).authenticated).toBe(true);
+});
+
+test('an anonymous admin PUT without a CSRF token is 403 problem+json', async ({ request }) => {
+  const response = await request.put('/api/admin/products/1', { data: {} });
+
+  expect(response.status()).toBe(403);
+  expect(response.headers()['content-type']).toContain(problemJson);
 });
 
 test('sign-out with the CSRF token answers the Keycloak logout URL and ends the session', async ({

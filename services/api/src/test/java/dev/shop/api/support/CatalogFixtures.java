@@ -9,7 +9,7 @@ public final class CatalogFixtures {
     private CatalogFixtures() {}
 
     public static void clear(JdbcClient jdbc) {
-        jdbc.sql("TRUNCATE product, category RESTART IDENTITY CASCADE").update();
+        jdbc.sql("TRUNCATE stock, product, category RESTART IDENTITY CASCADE").update();
     }
 
     public static void addCategory(JdbcClient jdbc, String slug, String name) {
@@ -38,6 +38,32 @@ public final class CatalogFixtures {
                 .param("active", active)
                 .param("category", categorySlug)
                 .update();
+        jdbc.sql("INSERT INTO stock (product_id, on_hand) SELECT id, 0 FROM product WHERE slug = :slug")
+                .param("slug", slug)
+                .update();
+    }
+
+    public static long idOf(JdbcClient jdbc, String slug) {
+        return jdbc.sql("SELECT id FROM product WHERE slug = :slug")
+                .param("slug", slug)
+                .query(Long.class)
+                .single();
+    }
+
+    /** Sets the quantity directly, the way the checkout slice will: no version bump. */
+    public static void setStock(JdbcClient jdbc, long productId, int onHand, int reserved) {
+        jdbc.sql("UPDATE stock SET on_hand = :onHand, reserved = :reserved WHERE product_id = :id")
+                .param("id", productId)
+                .param("onHand", onHand)
+                .param("reserved", reserved)
+                .update();
+    }
+
+    /** The audit table is append-only and never truncated; a test reads only the rows above this mark. */
+    public static long auditHighWaterMark(JdbcClient jdbc) {
+        return jdbc.sql("SELECT coalesce(max(id), 0) FROM admin_audit_event")
+                .query(Long.class)
+                .single();
     }
 
     /**

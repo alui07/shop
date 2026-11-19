@@ -1,5 +1,6 @@
 package dev.shop.api.auth;
 
+import io.lettuce.core.RedisCommandTimeoutException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -7,7 +8,6 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.dao.QueryTimeoutException;
 import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -41,9 +41,10 @@ final class ValkeyFailureFilter extends OncePerRequestFilter {
         }
     }
 
+    /** A query timeout is Valkey's only when Lettuce raised it; a JDBC one must not be reported as a session store outage. */
     private static boolean isValkeyFailure(Throwable failure) {
         for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
-            if (cause instanceof RedisConnectionFailureException || cause instanceof QueryTimeoutException) {
+            if (cause instanceof RedisConnectionFailureException || cause instanceof RedisCommandTimeoutException) {
                 return true;
             }
         }

@@ -86,6 +86,15 @@ class CatalogHttpIT {
     }
 
     @Test
+    void validationFailuresCarryTheFixedTypeAndTheOffendingParameter() throws Exception {
+        JsonNode problem = JSON.readTree(get(port, "/api/products?size=49").body());
+
+        assertThat(problem.get("type").asString()).isEqualTo("tag:shop.dev,2026:validation");
+        assertThat(problem.get("errors")).hasSize(1);
+        assertThat(problem.get("errors").get(0).get("field").asString()).isEqualTo("size");
+    }
+
+    @Test
     void aPagePastTheEndIsAnEmptyPageWithCorrectTotals() throws Exception {
         HttpResponse<String> response = get(port, "/api/products?page=9");
         JsonNode page = JSON.readTree(response.body());

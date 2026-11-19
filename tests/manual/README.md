@@ -87,6 +87,45 @@ Run these on `make dev` (Keycloak on http://localhost:8180) unless a step says k
   - Steps: with `make dev`, use only the keyboard to open Sign in, complete the Keycloak form, reach the user menu, open Admin, search and page the table, then sign out. Repeat with a screen reader.
   - Expected: logical, visible focus; the sign-in prompt, "no access" panel and failed-login alert are announced.
 
+## Admin writes (slice 3b)
+
+Run these on `make dev` (http://localhost:5173) as `admin@example.test` unless a step says otherwise. Read passwords from `.cache/secrets/shop.env`; do not paste them into notes or issues.
+
+- [ ] **Create, edit, stock change and audit in the dev stack**
+  - Why manual: it checks the dev stack end to end with a person reading the screens; e2e covers the same flow on the built images.
+  - Steps: open Admin, then "New product". Create a product with `Active` unchecked and note that the public catalog does not list it. Open its edit page, tick `Active`, save, and look for it in the public catalog. Set its stock and save. Open the Audit log.
+  - Expected: each save shows a success message and the next save works without reloading; the audit log shows `product.created`, `product.updated` and `stock.set` for the product, newest first, with your display name and the changed fields. Deactivate the product afterwards.
+
+- [ ] **Two tabs edit the same product (conflict)**
+  - Why manual: e2e simulates the second tab with a stale request; this checks what a person sees.
+  - Steps: open the same product's edit page in two tabs. Save a change in the first, then a different change in the second.
+  - Expected: the second tab shows a conflict alert, nothing is overwritten, and reloading the form shows the first tab's values. The same holds for the stock form.
+
+- [ ] **A busy product answers "try again" (lock timeout)**
+  - Why manual: e2e does not hold a database lock for 3 seconds.
+  - Steps: in `psql` (command in the audit check below), run `begin; select * from product where slug = 'oak-desk' for update;` and leave it open. In the shop, edit Oak Desk and save. Then `rollback;` and save again.
+  - Expected: after about 3 seconds the form shows "The product is busy; try again shortly" and nothing changes; after the rollback the save works.
+
+- [ ] **A demoted admin cannot write during a Keycloak outage (E5)**
+  - Why manual: it needs a role change in the Keycloak console, a stopped dependency and about 5 minutes of waiting; the automated test moves a fake clock.
+  - Steps: sign in as the admin and open a product's edit page. In the Keycloak admin console (http://localhost:8180, realm `shop`) remove the admin role from `admin@example.test`. Stop Keycloak: `docker compose -f deploy/compose/compose.yaml --env-file .cache/secrets/shop.env stop keycloak`. Wait more than 5 minutes after your last successful request to the API, then save the product. Start Keycloak again afterwards.
+  - Expected: the form shows the message "Your access cannot be confirmed right now" (HTTP 503 with `Retry-After: 300`) and nothing changes; the audit log has no row for it. Reads of the admin table still work until the 15-minute grace ends. With Keycloak up, the demotion takes effect within about 5 minutes: a save then gets 403 or the session ends.
+
+- [ ] **Audit log after a demotion**
+  - Why manual: it needs a person to judge what the log shows; the log records the stable `sub`, and the table shows the display name.
+  - Steps: make a change as the admin, demote the user in Keycloak as above, then sign in as another admin if you have one, or read the rows with `docker compose -f deploy/compose/compose.yaml --env-file .cache/secrets/shop.env exec postgres psql -U shop -c "select actor_subject, actor_name, action from admin_audit_event order by id desc limit 5"`.
+  - Expected: earlier rows are still present and unchanged with the actor's `sub`; `UPDATE` or `DELETE` on the table is refused by the trigger.
+
+- [ ] **Admin forms by keyboard and screen reader**
+  - Why manual: axe does not judge focus order, announcements or error wording.
+  - Steps: using only the keyboard, create a product, submit it empty and with a bad slug, fix the fields, save, then set stock. Repeat with a screen reader.
+  - Expected: logical, visible focus; each field error is announced with its field and moved to when submitting; saved and conflict messages are announced; the audit table has readable headers.
+
+- [ ] **Migrations V3 to V5 on an existing kind database**
+  - Why manual: it needs a cluster that ran 3a first, which a fresh `make cluster-up` does not give.
+  - Steps: on a cluster deployed from the 3a branch (`make cluster-up deploy`), switch to this branch and run `make deploy`. Check `make kubectl ARGS="-n shop logs deploy/api"` for Flyway.
+  - Expected: Flyway applies V3, V4 and V5 without waiting on a lock (each begins with a 5 s lock timeout), every product has a stock row, and the catalog still works.
+
 ## After the first push to GitHub
 
 - [ ] **Pull request workflow is green on a Linux runner**

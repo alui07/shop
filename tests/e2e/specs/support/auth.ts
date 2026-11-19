@@ -67,20 +67,31 @@ export interface BrowserResponse {
 export async function apiFetch(
   page: Page,
   path: string,
-  options: { method?: string; csrfToken?: string | null } = {},
+  options: { method?: string; csrfToken?: string | null; json?: unknown } = {},
 ): Promise<BrowserResponse> {
   return page.evaluate(
-    async ({ path: target, method, csrfToken }) => {
+    async ({ path: target, method, csrfToken, json }) => {
       const headers: Record<string, string> = {};
       if (csrfToken) headers['X-XSRF-TOKEN'] = csrfToken;
-      const response = await fetch(target, { method, headers, redirect: 'manual' });
+      if (json !== undefined) headers['Content-Type'] = 'application/json';
+      const response = await fetch(target, {
+        method,
+        headers,
+        redirect: 'manual',
+        body: json === undefined ? undefined : JSON.stringify(json),
+      });
       return {
         status: response.status,
         contentType: response.headers.get('content-type') ?? '',
         body: await response.text(),
       };
     },
-    { path, method: options.method ?? 'GET', csrfToken: options.csrfToken ?? null },
+    {
+      path,
+      method: options.method ?? 'GET',
+      csrfToken: options.csrfToken ?? null,
+      json: options.json,
+    },
   );
 }
 
