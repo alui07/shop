@@ -251,9 +251,10 @@ scan-api: cache-dirs api-build
 	docker save $(API_IMAGE) -o $(IMAGE_DIR)/api.tar
 	$(call trivy_report,image --input /build/images/api.tar,api,rm -f $(IMAGE_DIR)/api.tar)
 
+# Exceptions expire in apps/web/.trivyignore.yaml.
 scan-web: cache-dirs web-build
 	docker save $(WEB_IMAGE) -o $(IMAGE_DIR)/web.tar
-	$(call trivy_report,image --input /build/images/web.tar,web,rm -f $(IMAGE_DIR)/web.tar)
+	$(call trivy_report,image --ignorefile /src/apps/web/.trivyignore.yaml --input /build/images/web.tar,web,rm -f $(IMAGE_DIR)/web.tar)
 
 # Third-party image that we only re-optimise: fixable CRITICAL fails, HIGH is reported (gated in slice 6). Exceptions expire in deploy/keycloak/.trivyignore.yaml.
 scan-keycloak: cache-dirs keycloak-build
