@@ -23,3 +23,7 @@ vulnerabilities:
     purls: ['pkg:apk/alpine/nginx@1.30.6-r1']
     statement: Needs proxy_pass with variables plus SSI or mirror; apps/web/nginx.conf has none. Fixed in 1.30.7, image not yet published.
     expired_at: 2026-12-02
+  - id: CVE-2026-118899
+    purls: ['pkg:apk/alpine/nginx@1.30.6-r1']
+    statement: TLS listener only; apps/web/nginx.conf listens on plain HTTP 8080 with no ssl parameter. Fixed in 1.30.7, image not yet published.
+    expired_at: 2026-12-02

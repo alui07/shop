@@ -19,8 +19,9 @@ VALKEY_IMAGE := valkey/valkey:9.1.3-alpine3.24@sha256:bf09d58e96d6b4524a15396b65
 # renovate: datasource=docker depName=axllent/mailpit
 MAILPIT_IMAGE := axllent/mailpit:v1.33.1@sha256:aef2aacc11f075ec0fb6874275ee4a421e688e11a96ebb296134d1735c7761ce
 # Official image only; our Dockerfile re-optimises it. quay.io gives no release timestamps, so Renovate treats the age gate as optional for it.
+# 26.8.2 bumped by hand on 2026-11-19: the 26.8.2-3 rebuild (2026-11-19) carries OpenJDK 21.0.13.1.2, which fixes CVE-2026-114938 (CRITICAL).
 # renovate: datasource=docker depName=quay.io/keycloak/keycloak
-KEYCLOAK_IMAGE := quay.io/keycloak/keycloak:26.8.1@sha256:3f3c5f8e03c614774b4bd9173b88391fefa4153bfc010d8012d59ad825377332
+KEYCLOAK_IMAGE := quay.io/keycloak/keycloak:26.8.2@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3
 
 # renovate: datasource=docker depName=aquasec/trivy
 TRIVY_IMAGE := aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
