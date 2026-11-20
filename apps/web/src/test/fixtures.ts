@@ -63,6 +63,8 @@ export function adminProduct(id: number, name: string, active = true): AdminProd
     price: { amountMinor: 12999, currency: 'EUR' },
     category: chairs,
     active,
+    version: 3,
+    stock: { onHand: 5, reserved: 2, version: 7 },
   };
 }
 
@@ -70,5 +72,30 @@ export function adminProductPage(
   items: AdminProduct[],
   { page = 0, totalPages = 1, totalItems = items.length } = {},
 ): AdminProductPage {
+  return { items, page, size: 20, totalItems, totalPages };
+}
+
+type AuditEvent = components['schemas']['AuditEvent'];
+type AuditPage = components['schemas']['AuditPage'];
+
+export function auditEvent(id: number, overrides: Partial<AuditEvent> = {}): AuditEvent {
+  return {
+    id,
+    occurredAt: '2026-11-18T10:30:15Z',
+    actorSubject: 'subject-admin',
+    actorName: 'Ada Admin',
+    action: 'product.updated',
+    entityType: 'product',
+    entityId: 7,
+    traceId: null,
+    changes: [{ field: 'name', from: 'Oak chair', to: 'Oak chair 2' }],
+    ...overrides,
+  };
+}
+
+export function auditPage(
+  items: AuditEvent[],
+  { page = 0, totalPages = 1, totalItems = items.length } = {},
+): AuditPage {
   return { items, page, size: 20, totalItems, totalPages };
 }

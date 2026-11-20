@@ -238,10 +238,12 @@ public final class StubIdentityProvider implements AutoCloseable {
     private void serveRefresh(HttpExchange exchange, Map<String, String> form) throws IOException {
         refreshCount.incrementAndGet();
         sleep(refreshDelayMillis);
-        Identity known = refreshTokens.remove(form.get("refresh_token"));
         if (refreshMode == RefreshMode.SERVER_ERROR) {
             respond(exchange, 503, "Service Unavailable");
-        } else if (refreshMode == RefreshMode.INVALID_GRANT || known == null) {
+            return;
+        }
+        Identity known = refreshTokens.remove(form.get("refresh_token"));
+        if (refreshMode == RefreshMode.INVALID_GRANT || known == null) {
             respond(exchange, 400, "{\"error\":\"invalid_grant\",\"error_description\":\"Session not active\"}");
         } else {
             Identity current = currentIdentities.getOrDefault(known.subject(), known);

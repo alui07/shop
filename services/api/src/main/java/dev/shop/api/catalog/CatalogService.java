@@ -2,6 +2,8 @@ package dev.shop.api.catalog;
 
 import java.util.List;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 class CatalogService {
@@ -16,6 +18,7 @@ class CatalogService {
         return repository.findCategories();
     }
 
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     ProductPage search(String text, String categorySlug, ProductSort requestedSort, int page, int size) {
         String normalisedText = blankToNull(text);
         ProductSort sort = ProductSort.resolve(requestedSort, normalisedText != null);
@@ -27,7 +30,7 @@ class CatalogService {
     }
 
     ProductDetail product(String slug) {
-        return repository.findBySlug(slug).orElseThrow(() -> new ProductNotFoundException(slug));
+        return repository.findBySlug(slug).orElseThrow(() -> new ProductNotFoundException());
     }
 
     private static String blankToNull(String value) {

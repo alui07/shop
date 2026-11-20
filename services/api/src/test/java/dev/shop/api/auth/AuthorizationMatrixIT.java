@@ -29,6 +29,10 @@ class AuthorizationMatrixIT extends AuthIT {
                 Arguments.of("/api/me", 200, 200, 200),
                 Arguments.of("/api/admin/products", 401, 403, 200),
                 Arguments.of("/api/admin/products?size=101", 401, 403, 400),
+                Arguments.of("/api/admin/products/987654321", 401, 403, 404),
+                Arguments.of("/api/admin/products/0", 401, 403, 400),
+                Arguments.of("/api/admin/audit", 401, 403, 200),
+                Arguments.of("/api/admin/audit?size=0", 401, 403, 400),
                 Arguments.of("/api/admin/nothing", 401, 403, 404),
                 Arguments.of("/api/unknown", 401, 403, 403),
                 Arguments.of("/actuator/health", 401, 403, 403),
@@ -40,7 +44,12 @@ class AuthorizationMatrixIT extends AuthIT {
 
     static Stream<Arguments> unsafeRequests() {
         return Stream.of(
-                Arguments.of("POST", "/api/admin/products", 401, 403, 405),
+                Arguments.of("POST", "/api/admin/products", 401, 403, 400),
+                Arguments.of("PUT", "/api/admin/products", 401, 403, 405),
+                Arguments.of("PUT", "/api/admin/products/1", 401, 403, 400),
+                Arguments.of("PUT", "/api/admin/products/1/stock", 401, 403, 400),
+                Arguments.of("DELETE", "/api/admin/products/1", 401, 403, 405),
+                Arguments.of("POST", "/api/admin/audit", 401, 403, 405),
                 Arguments.of("PUT", "/api/products/x", 401, 403, 403),
                 Arguments.of("DELETE", "/api/me", 401, 403, 403),
                 Arguments.of("POST", "/api/unknown", 401, 403, 403));
@@ -85,6 +94,29 @@ class AuthorizationMatrixIT extends AuthIT {
             assertThat(JSON.readTree(response.body()).get("detail").asString())
                     .isEqualTo("CSRF token missing or invalid");
         }
+    }
+
+    @Test
+    void anOversizedMalformedBodyIsRefusedBeforeItIsParsed() throws Exception {
+        String megabyte = "{" + "x".repeat(1 << 20);
+
+        HttpResponse<String> anonymous = postWithToken(browser(), megabyte);
+        HttpResponse<String> customer = postWithToken(signedInAs(Identity.customer()), megabyte);
+
+        assertProblem(anonymous, 401, "Unauthorized", "Authentication required");
+        assertProblem(customer, 403, "Forbidden", "Access is denied");
+    }
+
+    private static HttpResponse<String> postWithToken(TestBrowser browser, String body) {
+        browser.get("/api/me");
+        return browser.send(
+                "POST",
+                "/api/admin/products",
+                body,
+                "Content-Type",
+                "application/json",
+                "X-XSRF-TOKEN",
+                browser.cookie(TestBrowser.CSRF_COOKIE));
     }
 
     @Test

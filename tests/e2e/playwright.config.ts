@@ -29,5 +29,25 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  // The write spec makes a product active for a moment, which would break the count-asserting public
+  // specs, so it runs alone after them; the setup deactivates leftovers of an earlier run first.
+  projects: [
+    {
+      name: 'admin-cleanup',
+      testMatch: /admin-cleanup\.setup\.ts/,
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'chromium',
+      dependencies: ['admin-cleanup'],
+      testIgnore: /admin-writes\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'admin-writes',
+      dependencies: ['chromium'],
+      testMatch: /admin-writes\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'] },
+    },
+  ],
 });

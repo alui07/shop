@@ -59,6 +59,15 @@ class AdminProductListIT extends AuthIT {
     }
 
     @Test
+    void aFilterThatMatchesNothingGivesAnEmptyPage() throws Exception {
+        JsonNode page = JSON.readTree(admin.get("/api/admin/products?q=zzzz").body());
+
+        assertThat(page.get("items")).isEmpty();
+        assertThat(page.get("totalItems").asLong()).isZero();
+        assertThat(page.get("totalPages").asInt()).isZero();
+    }
+
+    @Test
     void pagesTheResult() throws Exception {
         JsonNode second =
                 JSON.readTree(admin.get("/api/admin/products?page=1&size=2").body());

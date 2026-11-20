@@ -133,14 +133,14 @@ class CatalogControllerTest {
 
     @Test
     void anUnknownProductIsProblemDetailsNotFound() throws Exception {
-        when(service.product("nope")).thenThrow(new ProductNotFoundException("nope"));
+        when(service.product("nope")).thenThrow(new ProductNotFoundException());
 
         mockMvc.perform(get("/api/products/nope"))
                 .andExpect(status().isNotFound())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(jsonPath("$.status").value(404))
                 .andExpect(jsonPath("$.title").value("Not Found"))
-                .andExpect(jsonPath("$.detail").value("No product with slug 'nope'"));
+                .andExpect(jsonPath("$.detail").value("Product not found"));
     }
 
     @Test

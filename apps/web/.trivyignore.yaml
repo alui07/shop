@@ -1,0 +1,25 @@
+# Accepted findings for scan-web. Every entry needs an expired_at date (at most 30 days out) and a statement.
+# Temporary: nginx 1.30.7 (fixes all of these) was released 2026-11-18, but nginxinc/nginx-unprivileged:1.30.7-alpine-slim
+# was not yet published. Remove these entries and bump NGINX_IMAGE in deploy/versions.mk by hand once it exists.
+# Each entry is scoped to the affected nginx package version, so it stops matching once the base image moves on.
+vulnerabilities:
+  - id: CVE-2026-113425
+    purls: ['pkg:apk/alpine/nginx@1.30.6-r1']
+    statement: Mail proxy only; apps/web/nginx.conf has no mail block. Fixed in 1.30.7, image not yet published.
+    expired_at: 2026-12-02
+  - id: CVE-2026-121810
+    purls: ['pkg:apk/alpine/nginx@1.30.6-r1']
+    statement: HTTP/3 only; apps/web/nginx.conf has no quic listener. Fixed in 1.30.7, image not yet published.
+    expired_at: 2026-12-02
+  - id: CVE-2026-123007
+    purls: ['pkg:apk/alpine/nginx@1.30.6-r1']
+    statement: HTTP/2 only; apps/web/nginx.conf listens on plain HTTP/1.1. Fixed in 1.30.7, image not yet published.
+    expired_at: 2026-12-02
+  - id: CVE-2026-123633
+    purls: ['pkg:apk/alpine/nginx@1.30.6-r1']
+    statement: HTTP/2 only; apps/web/nginx.conf listens on plain HTTP/1.1. Fixed in 1.30.7, image not yet published.
+    expired_at: 2026-12-02
+  - id: CVE-2026-123634
+    purls: ['pkg:apk/alpine/nginx@1.30.6-r1']
+    statement: Needs proxy_pass with variables plus SSI or mirror; apps/web/nginx.conf has none. Fixed in 1.30.7, image not yet published.
+    expired_at: 2026-12-02

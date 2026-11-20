@@ -2,7 +2,9 @@ package dev.shop.api.auth;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import dev.shop.api.support.AdminClient;
 import dev.shop.api.support.AuthIT;
+import dev.shop.api.support.CatalogFixtures;
 import dev.shop.api.support.Identity;
 import dev.shop.api.support.StubIdentityProvider.RefreshMode;
 import dev.shop.api.support.TestBrowser;
@@ -16,10 +18,17 @@ import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.session.Session;
 import org.springframework.session.SessionRepository;
 
 class RevalidationIT extends AuthIT {
+
+    @Autowired
+    private JdbcClient jdbc;
+
+    private long auditMark;
 
     private static final Duration PAST_REVALIDATION = Duration.ofMinutes(6);
 
@@ -182,5 +191,87 @@ class RevalidationIT extends AuthIT {
         assertThat(a.join().statusCode()).isEqualTo(200);
         assertThat(b.join().statusCode()).isEqualTo(200);
         assertThat(idp.refreshCount()).isEqualTo(1);
+    }
+
+    @Test
+    void aDemotedAdminCannotWriteWhileKeycloakIsDownButStillReadsWithinTheGrace() {
+        Identity admin = Identity.admin();
+        AdminClient client = new AdminClient(signedInAs(admin));
+        long id = oneProduct();
+        idp.updateIdentity(admin.withRoles(List.of("customer")));
+        idp.setRefreshMode(RefreshMode.SERVER_ERROR);
+
+        clock.advance(PAST_REVALIDATION);
+        HttpResponse<String> write = client.put("/api/admin/products/" + id, productUpdate(0));
+
+        assertThat(write.statusCode()).isEqualTo(503);
+        assertThat(write.headers().firstValue("Content-Type").orElseThrow()).startsWith("application/problem+json");
+        assertThat(write.body()).contains("Your access cannot be confirmed right now");
+        assertThat(write.headers().firstValue("Retry-After")).contains("300");
+        assertThat(client.get("/api/admin/products").statusCode()).isEqualTo(200);
+        assertThat(auditRowsAboveTheMark()).isZero();
+    }
+
+    @Test
+    void aPercentEncodedAdminPathDoesNotSkipTheOverdueConfirmationCheck() {
+        AdminClient client = new AdminClient(signedInAs(Identity.admin()));
+        long id = oneProduct();
+        idp.setRefreshMode(RefreshMode.SERVER_ERROR);
+        clock.advance(PAST_REVALIDATION);
+
+        HttpResponse<String> write = client.put("/api/%61dmin/products/" + id, productUpdate(0));
+
+        assertThat(write.statusCode()).isEqualTo(503);
+        assertThat(auditRowsAboveTheMark()).isZero();
+    }
+
+    @Test
+    void afterKeycloakRecoversTheSameWriteSucceedsForAnAdminWhoKeepsTheRole() {
+        AdminClient client = new AdminClient(signedInAs(Identity.admin()));
+        long id = oneProduct();
+        idp.setRefreshMode(RefreshMode.SERVER_ERROR);
+        clock.advance(PAST_REVALIDATION);
+        assertThat(client.put("/api/admin/products/" + id, productUpdate(0)).statusCode())
+                .isEqualTo(503);
+
+        idp.setRefreshMode(RefreshMode.OK);
+        clock.advance(PAST_REVALIDATION);
+
+        HttpResponse<String> recovered = client.put("/api/admin/products/" + id, productUpdate(0));
+        assertThat(recovered.statusCode()).as(recovered.body()).isEqualTo(200);
+        assertThat(auditRowsAboveTheMark()).isEqualTo(1);
+    }
+
+    @Test
+    void aDemotionAppliedAtRecoveryTurnsTheWriteIntoA403() {
+        Identity admin = Identity.admin();
+        AdminClient client = new AdminClient(signedInAs(admin));
+        long id = oneProduct();
+        idp.updateIdentity(admin.withRoles(List.of("customer")));
+
+        clock.advance(PAST_REVALIDATION);
+
+        assertThat(client.put("/api/admin/products/" + id, productUpdate(0)).statusCode())
+                .isEqualTo(403);
+    }
+
+    private long oneProduct() {
+        CatalogFixtures.clear(jdbc);
+        CatalogFixtures.addCategory(jdbc, "office", "Office");
+        CatalogFixtures.addProduct(jdbc, "walnut-desk", "Walnut Desk", "Solid", 49900, "office", true);
+        auditMark = CatalogFixtures.auditHighWaterMark(jdbc);
+        return CatalogFixtures.idOf(jdbc, "walnut-desk");
+    }
+
+    private static String productUpdate(long version) {
+        return "{\"name\":\"Renamed\",\"description\":\"Solid\",\"priceMinor\":49900,\"categorySlug\":\"office\","
+                + "\"active\":true,\"version\":" + version + "}";
+    }
+
+    private long auditRowsAboveTheMark() {
+        return jdbc.sql("SELECT count(*) FROM admin_audit_event WHERE id > :mark")
+                .param("mark", auditMark)
+                .query(Long.class)
+                .single();
     }
 }

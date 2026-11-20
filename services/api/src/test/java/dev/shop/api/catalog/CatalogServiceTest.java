@@ -90,6 +90,6 @@ class CatalogServiceTest {
 
         assertThatThrownBy(() -> service.product("x"))
                 .isInstanceOf(ProductNotFoundException.class)
-                .hasMessageContaining("No product with slug 'x'");
+                .hasMessageContaining("Product not found");
     }
 }

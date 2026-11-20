@@ -19,6 +19,11 @@ class ProductRepository {
     private static final String SUMMARY_COLUMNS =
             "SELECT p.slug, p.name, p.price_minor, p.currency, c.slug AS category_slug, c.name AS category_name";
 
+    private static final String MANAGED_COLUMNS = """
+            SELECT p.id, p.slug, p.name, p.description, p.price_minor, p.currency, p.active, p.version,
+                   c.slug AS category_slug, c.name AS category_name
+            """;
+
     private final JdbcClient jdbc;
 
     ProductRepository(JdbcClient jdbc) {
@@ -66,27 +71,18 @@ class ProductRepository {
                 .optional();
     }
 
-    List<AdminProduct> findAllPage(String filter, int page, int size) {
+    List<ManagedProduct> findAllPage(String filter, int page, int size) {
         Map<String, Object> parameters = nameOrSlugParameters(filter);
         parameters.put("limit", size);
         parameters.put("offset", (long) page * size);
-        return jdbc.sql("""
-                        SELECT p.id, p.slug, p.name, p.description, p.price_minor, p.currency, p.active,
-                               c.slug AS category_slug, c.name AS category_name
+        return jdbc.sql(MANAGED_COLUMNS + """
                         FROM product p JOIN category c ON c.id = p.category_id
                         WHERE :filter::text IS NULL OR position(lower(:filter) in lower(p.name)) > 0
                               OR position(lower(:filter) in p.slug) > 0
                         ORDER BY lower(p.name), p.id LIMIT :limit OFFSET :offset
                         """)
                 .params(parameters)
-                .query((rs, rowNum) -> new AdminProduct(
-                        rs.getLong("id"),
-                        rs.getString("slug"),
-                        rs.getString("name"),
-                        rs.getString("description"),
-                        mapPrice(rs),
-                        mapCategory(rs),
-                        rs.getBoolean("active")))
+                .query(ProductRepository::mapManaged)
                 .list();
     }
 
@@ -99,6 +95,64 @@ class ProductRepository {
                 .params(nameOrSlugParameters(filter))
                 .query(Long.class)
                 .single();
+    }
+
+    Optional<ManagedProduct> findManagedById(long id) {
+        return findManagedById(id, "");
+    }
+
+    /** Takes the row lock that serialises concurrent changes to one product. */
+    Optional<ManagedProduct> lockManagedById(long id) {
+        return findManagedById(id, " FOR UPDATE OF p");
+    }
+
+    private Optional<ManagedProduct> findManagedById(long id, String lockClause) {
+        return jdbc.sql(MANAGED_COLUMNS + " FROM product p JOIN category c ON c.id = p.category_id WHERE p.id = :id"
+                        + lockClause)
+                .param("id", id)
+                .query(ProductRepository::mapManaged)
+                .optional();
+    }
+
+    Optional<Long> findCategoryId(String categorySlug) {
+        return jdbc.sql("SELECT id FROM category WHERE slug = :slug")
+                .param("slug", categorySlug)
+                .query(Long.class)
+                .optional();
+    }
+
+    /** Empty when the slug is taken; any other integrity failure is a bug and propagates. */
+    Optional<Long> insertIfSlugFree(NewProduct product, long categoryId) {
+        return jdbc.sql("""
+                        INSERT INTO product (slug, name, description, price_minor, currency, category_id, active)
+                        VALUES (:slug, :name, :description, :price, 'EUR', :category, :active)
+                        ON CONFLICT (slug) DO NOTHING
+                        RETURNING id
+                        """)
+                .param("slug", product.slug())
+                .param("name", product.name())
+                .param("description", product.description())
+                .param("price", product.priceMinor())
+                .param("category", categoryId)
+                .param("active", product.active())
+                .query(Long.class)
+                .optional();
+    }
+
+    void update(long id, ProductChanges changes, long categoryId) {
+        jdbc.sql("""
+                        UPDATE product
+                        SET name = :name, description = :description, price_minor = :price,
+                            category_id = :category, active = :active, version = version + 1
+                        WHERE id = :id
+                        """)
+                .param("id", id)
+                .param("name", changes.name())
+                .param("description", changes.description())
+                .param("price", changes.priceMinor())
+                .param("category", categoryId)
+                .param("active", changes.active())
+                .update();
     }
 
     private static Map<String, Object> nameOrSlugParameters(String filter) {
@@ -120,6 +174,18 @@ class ProductRepository {
             parameters.put("category", search.categorySlug());
         }
         return parameters;
+    }
+
+    private static ManagedProduct mapManaged(ResultSet rs, int rowNum) throws SQLException {
+        return new ManagedProduct(
+                rs.getLong("id"),
+                rs.getString("slug"),
+                rs.getString("name"),
+                rs.getString("description"),
+                mapPrice(rs),
+                mapCategory(rs),
+                rs.getBoolean("active"),
+                rs.getLong("version"));
     }
 
     private static ProductSummary mapSummary(ResultSet rs, int rowNum) throws SQLException {

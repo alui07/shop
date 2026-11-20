@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import type { Page } from '@playwright/test';
 import { signIn } from './support/auth';
+import { findAdminProductBySlug } from './support/admin';
 import {
   collectBrowserDiagnostics,
   isFailedLoadOf,
@@ -57,5 +58,52 @@ test('the anonymous admin page has no accessibility violations', async ({ page }
   await page.goto('/admin');
   await expect(page.getByRole('heading', { level: 1 }).first()).toBeVisible();
 
+  expect(await violationsOn(page)).toEqual([]);
+});
+
+// The admin write pages. Read-only: nothing is saved, and no seed product is edited.
+async function openAdminWritePages(page: Page): Promise<string[]> {
+  const oakDesk = await findAdminProductBySlug(page, 'oak-desk');
+  const paths = ['/admin/products/new', '/admin/audit', `/admin/products/${oakDesk.id}`];
+  for (const path of paths) {
+    await page.goto(path);
+    await expect(page.getByRole('heading', { level: 1 }).first()).toBeVisible();
+    await settle(page);
+  }
+  return paths;
+}
+
+async function showSlugValidationError(page: Page): Promise<void> {
+  await page.goto('/admin/products/new');
+  await page.getByLabel('Slug').fill('Bad Slug');
+  await page.getByRole('button', { name: 'Create product' }).click();
+  await expect(page.getByLabel('Slug')).toHaveAttribute('aria-invalid', 'true');
+  await settle(page);
+}
+
+test('the admin write pages have no CSP violations', async ({ page }) => {
+  await signIn(page, 'admin');
+  const diagnostics = await collectBrowserDiagnostics(page);
+
+  await openAdminWritePages(page);
+  await showSlugValidationError(page);
+
+  expect(diagnostics.cspViolations).toEqual([]);
+  expect(diagnostics.pageErrors).toEqual([]);
+  expect(diagnostics.consoleErrors.filter((error) => !isInsecureOriginNotice(error))).toEqual([]);
+});
+
+test('the admin write pages have no accessibility violations', async ({ page }) => {
+  await signIn(page, 'admin');
+  const oakDesk = await findAdminProductBySlug(page, 'oak-desk');
+
+  for (const path of ['/admin/products/new', '/admin/audit', `/admin/products/${oakDesk.id}`]) {
+    await page.goto(path);
+    await expect(page.getByRole('heading', { level: 1 }).first()).toBeVisible();
+    await settle(page);
+    expect(await violationsOn(page), path).toEqual([]);
+  }
+
+  await showSlugValidationError(page);
   expect(await violationsOn(page)).toEqual([]);
 });

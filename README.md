@@ -1,6 +1,6 @@
 # shop
 
-Spring Boot API (`services/api`) and React web app (`apps/web`). Visitors can browse a seeded product catalog: search, filter by category, sort, page through results and open a product page. Users sign in through Keycloak; admins get a read-only product table. Every tool runs in a pinned container; `make` is the only entry point, locally and in CI.
+Spring Boot API (`services/api`) and React web app (`apps/web`). Visitors can browse a seeded product catalog: search, filter by category, sort, page through results and open a product page. Users sign in through Keycloak; admins manage products and stock and read an audit log. Every tool runs in a pinned container; `make` is the only entry point, locally and in CI.
 
 ## Prerequisites
 
@@ -57,7 +57,10 @@ Web routes:
 | `/` | Product catalog. Search, category, sort and page live in the URL (`?q=&category=&sort=&page=`), so views can be bookmarked and shared. `page` is 1-based in the URL |
 | `/products/$slug` | One product |
 | `/status` | API status and version |
-| `/admin` | Admin area. Anonymous visitors get a sign-in prompt, customers a "no access" panel, admins a read-only product table (search and paging, inactive products included) |
+| `/admin` | Admin area. Anonymous visitors get a sign-in prompt, customers a "no access" panel, admins the product table (search and paging, inactive products included) with a link per product to its edit page |
+| `/admin/products/new` | Admin only: create a product |
+| `/admin/products/$id` | Admin only: edit a product (name, description, price, category, active) and set its stock |
+| `/admin/audit` | Admin only: the audit log, newest first |
 
 Sign-in and sign-out are not SPA routes: `/oauth2/authorization/keycloak` starts sign-in, `/login/oauth2/code/keycloak` is the callback and `POST /logout` ends the session. These paths, and `/login/oauth2/`, `/oauth2/` and exact `/logout`, are routed to the API. `/login` is an SPA path. Failed sign-in lands on `/?login=failed`.
 
@@ -70,12 +73,20 @@ API endpoints (all under `/api`, errors are RFC 9457 Problem Details):
 | `GET /api/products/{slug}` | One product, or 404 |
 | `GET /api/status` | Status and version |
 | `GET /api/me` | Public. `{authenticated, ...}` with name, email and roles when signed in |
-| `GET /api/admin/products?q=&page=&size=` | Admin only: products including inactive, sorted by name |
+| `GET /api/admin/products?q=&page=&size=` | Admin only: products including inactive, sorted by name, each with `stock {onHand, reserved, version}` |
+| `POST /api/admin/products` | Admin only: create a product (201, stock starts at 0) |
+| `GET /api/admin/products/{id}`, `PUT /api/admin/products/{id}` | Admin only: read or update a product. The body carries the `version` you read; a stale one gets 409. The slug cannot change; `active` is part of the body |
+| `PUT /api/admin/products/{id}/stock` | Admin only: set `onHand` (with the stock `version`); never below `reserved` |
+| `GET /api/admin/audit?page=&size=` | Admin only: audit events, newest first |
 | `POST /logout` | Signed-in users, CSRF token required. Ends the session and answers `{"redirectUrl"}` for Keycloak's end-session page |
 
-Unsafe requests (POST, PUT, PATCH, DELETE) need the `X-XSRF-TOKEN` header matching the `__Host-XSRF-TOKEN` cookie, otherwise 403. Everything not listed is denied: an unknown `/api` path returns 401 to anonymous callers and 403 to signed-in ones (it used to be 404), and `/actuator/env` and `/actuator/info` on the management port return 401. Admin endpoints answer 401 to anonymous callers and 403 to customers.
+Unsafe requests (POST, PUT, PATCH, DELETE) need the `X-XSRF-TOKEN` header matching the `__Host-XSRF-TOKEN` cookie, otherwise 403. Everything not listed is denied: an unknown `/api` path returns 401 to anonymous callers and 403 to signed-in ones (it used to be 404), and `/actuator/env` and `/actuator/info` on the management port return 401. Admin endpoints answer 401 to anonymous callers and 403 to customers, and send `Cache-Control: no-store`. Validation errors are 400 and conflicts 409 with `application/problem+json` and an `errors` array; a row lock held longer than 3 s gives 503 with `Retry-After: 3`. Admin writes also give 503 when the last successful check with Keycloak is older than 5 minutes (a demoted admin cannot keep writing while Keycloak is down), with `Retry-After: 300`; writes can stay at 503 for up to 5 minutes after Keycloak recovers.
 
 The contract is committed as `services/api/openapi/openapi.json`; the design is in `docs/adr/0003-catalog-data-and-api.md`.
+
+### Admin writes locally
+
+Sign in as `admin@example.test` at http://localhost:5173 (`make dev`) and open Admin. "New product" creates a product (unchecked `Active` keeps it hidden from the public catalog); a product's edit page changes its fields and, in a separate form, its stock. The Audit link lists every create, edit and stock change with the admin's display name and time (the API also returns the actor's `sub`; the table does not show it yet). Each form saves with the version it loaded, so two admins editing the same product get a conflict message instead of overwriting each other. Design and rules: `docs/adr/0007-admin-product-and-stock.md`.
 
 ### Spring profiles
 
@@ -83,7 +94,7 @@ The contract is committed as `services/api/openapi/openapi.json`; the design is 
 |---|---|
 | none (production defaults) | JSON logs, no demo data, `/v3/api-docs` off |
 | `dev` | Readable console logs, `/v3/api-docs` on |
-| `seed` | Loads the demo catalog (about 60 products, 6 categories) |
+| `seed` | Loads the demo catalog (about 60 products, 6 categories) with stock quantities |
 
 ## Targets
 
@@ -140,8 +151,8 @@ build/                      gitignored reports
 
 - `docs/plans/`: the master plan, the brief for each slice and `STATUS.md`. Start with `docs/plans/README.md` to see where the work stands and how to resume it.
 - `tests/`: every kind of test, what it proves and how to run it, how the end-to-end stack works and how to debug it (`tests/README.md`). Unit and integration tests live next to the code in each app.
-- `docs/adr/`: why the tooling, testing, catalog API, web security headers, local Kubernetes cluster and authentication are set up this way.
-- `docs/threat-model.md`: assets, trust boundaries, threats and residual risks of sign-in and sessions.
+- `docs/adr/`: why the tooling, testing, catalog API, web security headers, local Kubernetes cluster, authentication and admin writes are set up this way.
+- `docs/threat-model.md`: assets, trust boundaries, threats and residual risks of sign-in, sessions and admin writes.
 
 ## Manual steps
 
@@ -165,8 +176,11 @@ Some things cannot be automated: first-time Docker group setup, checking the fir
 - In kind, Valkey's image version is pinned only in `deploy/versions.mk`, and a secrets hash annotation restarts `api` and `keycloak` when `.cache/secrets/shop.env` changes.
 - The client IP from `X-Forwarded-For` is not trustworthy yet and nothing uses it; fix it before slice 5 (`docs/threat-model.md`, R20).
 - Keycloak's image scan fails only on fixable CRITICAL findings; HIGH is reported (gated in slice 6).
+- Until 2026-12-02 `scan-web` ignores 5 HIGH nginx 1.30.6 CVEs (HTTP/2, HTTP/3, mail, proxy with SSI or mirror; none reachable with `apps/web/nginx.conf`) in `apps/web/.trivyignore.yaml`, pending the nginx-unprivileged 1.30.7 image.
 - Playwright traces from failed e2e runs record typed test passwords (`tests/README.md`).
-- Admin writes, stock and audit arrive in slice 3b; the admin page is read-only.
+- Admin writes: the slug cannot change after create; a product is hidden by clearing `Active`, never deleted. Admins set `onHand`; `reserved` belongs to checkout (slice 4). There is no audit filter or export and no rate limit on writes until slice 5. The audit log is append-only by database triggers, but the database owner role can disable them (`docs/threat-model.md`, R21).
+- A demoted admin can still write for up to 5 minutes while Keycloak is up. With Keycloak down, admin writes get 503 once the last success is older than 5 minutes, while reads continue to the 15-minute grace.
+- On dev and kind, changing the seed file re-activates a seed product an admin deactivated and overwrites an admin-created product with the same slug. Stock rows an admin edited are kept.
 - The first `make dev` is slow while Maven downloads dependencies into `.cache/m2`.
 - `trivy convert` cannot filter unfixed vulnerabilities, so `--ignore-unfixed` is applied at scan time and also narrows the SARIF output.
 - `make test` mounts the Docker socket into the Maven container, which is root-equivalent on the host. See `docs/adr/0001-containerised-tooling.md`. The kind container in `cluster-up`, `deploy` and `cluster-diagnostics` gets it too (`docs/adr/0005-local-kubernetes-on-kind.md`); kubectl and Helm do not.

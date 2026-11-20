@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
+import { Link } from '@tanstack/react-router';
 import { adminProductsQuery } from '@/api/admin';
 import { ApiError } from '@/api/catalog';
+import { buttonVariants } from '@/components/ui/button';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import type { AdminSearch } from '@/lib/adminSearch';
 import { AdminProductTable } from './AdminProductTable';
@@ -25,7 +27,12 @@ export function AdminProductsView({
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Admin products</h1>
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="text-2xl font-semibold">Admin products</h1>
+        <Link to="/admin/products/new" className={buttonVariants()}>
+          New product
+        </Link>
+      </div>
       <SearchForm key={search.q ?? ''} initialQuery={search.q ?? ''} onSearch={onSearch} />
       {isPending && <LoadingMessage text="Loading products" />}
       {error && <p role="alert">The products could not be loaded.</p>}

@@ -20,6 +20,23 @@ export default defineConfig(
     languageOptions: { globals: globals.browser },
   },
   {
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/lib/zod.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'zod',
+              message: "Import z from '@/lib/zod' so the CSP-safe jitless config applies.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ['*.{js,ts}'],
     languageOptions: { globals: globals.node },
   },

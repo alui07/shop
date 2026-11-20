@@ -5,6 +5,9 @@ spring:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/shop}
     username: ${SPRING_DATASOURCE_USERNAME:shop}
     password: ${SPRING_DATASOURCE_PASSWORD:}
+    hikari:
+      data-source-properties:
+        options: "-c lock_timeout=3s"
   flyway:
     ignore-migration-patterns: "*:future,repeatable:missing"
     connect-retries: 12

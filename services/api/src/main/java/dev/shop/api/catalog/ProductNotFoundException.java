@@ -6,10 +6,9 @@ import org.springframework.web.ErrorResponseException;
 
 class ProductNotFoundException extends ErrorResponseException {
 
-    ProductNotFoundException(String slug) {
-        super(
-                HttpStatus.NOT_FOUND,
-                ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, "No product with slug '" + slug + "'"),
-                null);
+    private static final String DETAIL = "Product not found";
+
+    ProductNotFoundException() {
+        super(HttpStatus.NOT_FOUND, ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, DETAIL), null);
     }
 }
