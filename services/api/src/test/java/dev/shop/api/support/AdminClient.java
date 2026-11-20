@@ -28,6 +28,15 @@ public final class AdminClient {
         return sendJson("PUT", path, body, headers);
     }
 
+    /** A JSON request that deliberately leaves out the CSRF header. */
+    public HttpResponse<String> postWithoutCsrf(String path, String body, String... headers) {
+        String[] all = new String[headers.length + 2];
+        System.arraycopy(headers, 0, all, 0, headers.length);
+        all[headers.length] = "Content-Type";
+        all[headers.length + 1] = "application/json";
+        return browser.send("POST", path, body, all);
+    }
+
     public HttpResponse<String> sendJson(String method, String path, String body, String... headers) {
         String[] all = new String[headers.length + 4];
         System.arraycopy(headers, 0, all, 0, headers.length);

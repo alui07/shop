@@ -45,7 +45,21 @@ class OpenApiContractIT {
     void everyPropertyOfTheMainSchemasIsRequired() {
         JsonNode schemas = liveDocument().get("components").get("schemas");
 
-        for (String name : new String[] {"Money", "ProductSummary", "ProductPage", "ProductDetail", "Category"}) {
+        for (String name : new String[] {
+            "Money",
+            "ProductSummary",
+            "ProductPage",
+            "ProductDetail",
+            "Category",
+            "Cart",
+            "CartLine",
+            "CartLineInput",
+            "CheckoutInput",
+            "Order",
+            "OrderLine",
+            "OrderSummary",
+            "OrderPage"
+        }) {
             JsonNode schema = schemas.get(name);
             assertThat(schema.get("required").valueStream().map(JsonNode::asString))
                     .as(name)

@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.shop.api.catalog.Category;
 import dev.shop.api.catalog.ManagedProduct;
-import dev.shop.api.catalog.Money;
+import dev.shop.api.catalog.pricing.Money;
 import dev.shop.api.inventory.StockLevel;
 import org.junit.jupiter.api.Test;
 

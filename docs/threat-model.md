@@ -1,6 +1,6 @@
 # Threat model
 
-Status: slice 3a matches the implemented code and its tests (API 100% line and branch, compose and cluster e2e). The admin section (slice 3b) was checked against the code (API 128 unit and 272 integration tests, web 294, e2e 85). Checkout and webhook sections arrive in slice 4. Design rationale is in ADR 0006 (authentication) and ADR 0007 (admin writes).
+Status: slice 3a matches the implemented code and its tests (API 100% line and branch, compose and cluster e2e). The admin section (slice 3b) was checked against the code (API 128 unit and 272 integration tests, web 294, e2e 85). The checkout section (slice 4a) was checked against the implemented code and its tests (API 154 unit and 456 integration tests, web 391); the webhook section arrives in slice 4b. Design rationale is in ADR 0006 (authentication) and ADR 0007 (admin writes).
 
 ## Authentication and sessions
 
@@ -96,6 +96,55 @@ Status: slice 3a matches the implemented code and its tests (API 100% line and b
 | W16 | Stale privileges on writes | Elevation | Overdue revalidation gives 503 on admin writes (R14); `invalid_grant` ends the session |
 | W17 | Retry or double submit | Tampering | `PUT` carries a version, `POST` is unique by slug, so a retry gets 409; the web client never resubmits on a 5xx |
 
+## Cart and checkout (slice 4a)
+
+Each claim below was checked against the 4a code. Design rationale is in ADR 0008. The payment and webhook parts arrive in 4b.
+
+### Assets
+
+| Asset | Why it matters |
+|---|---|
+| Stock (`on_hand`, `reserved`) | Overselling loses money and trust; leaked or stuck `reserved` blocks sales |
+| Prices and order snapshots | The customer pays what the order says; a wrong snapshot is a wrong charge |
+| Orders and order history | Personal purchase data, scoped to one customer |
+| `orders.email` | Personal data at rest (R45) |
+| Idempotency keys | Decide whether a retry creates a second order |
+| Customer session | Authorises cart and checkout calls |
+
+### Trust boundaries
+
+| Boundary | Crossing | Control |
+|---|---|---|
+| Browser to API (cart, checkout, orders) | JSON bodies, `Idempotency-Key`, cookies | Session, CSRF, `CUSTOMER` role, Bean Validation, 16 KiB body cap |
+| Order module to inventory | In-process reservation calls | Named interface `inventory::reservations`; `admin` cannot reach it; `Propagation.MANDATORY` |
+| API to Postgres | Row locks, conditional updates | Global lock order, `lock_timeout` 3 s, check constraints |
+| Several API replicas to one database | Expiry job, concurrent checkouts | `FOR UPDATE SKIP LOCKED` batches, row locks, no in-memory state |
+| Identity provider claims to stored data | `email`, `email_verified` | Only a verified, bounded address is stored |
+
+### STRIDE
+
+Caps are per account; accounts are free once self-registration arrives (R36 in 4b).
+
+| # | Threat | Category | Mitigation |
+|---|---|---|---|
+| K1 | IDOR: reading or cancelling another customer's order | Information disclosure, tampering | Queries filter `customer_subject = :sub`, with `FOR UPDATE` where they lock, never lock then compare; a foreign or unknown id is 404; order ids are random UUIDs, scoped, not a secret; `OrderEndpointsIT` covers read and cancel of another customer's order |
+| K2 | Anonymous or non-customer reaches cart or checkout | Elevation | URL rule `hasRole("CUSTOMER")`, `@PreAuthorize` on services, anonymous 401, no customer role 403; `AuthorizationMatrixIT` covers every new route |
+| K3 | CSRF on cart, checkout or cancel | Tampering | Every unsafe method needs the CSRF header (A5); `CsrfIT` and e2e cover the new routes |
+| K4 | Price tampering: client states a price or stale total | Tampering | The client sends no prices; the server re-prices under `FOR SHARE` on the product rows and compares `expectedTotalMinor` (409 `price-changed`); lines snapshot the price at commit (closes R29) |
+| K5 | Stale cart: lines changed in another tab or by a bot | Tampering | `cartVersion` must match under the cart row lock, else 409 `cart-changed`; every line change bumps the version |
+| K6 | Race oversell: many customers, one last unit | Tampering | Conditional `UPDATE ... WHERE on_hand - reserved >= :q` plus `CHECK (reserved <= on_hand)`; `StockRaceIT` (fifty customers for ten units, an admin lowering stock, checkouts racing the expiry job) asserts no oversell and that `reserved` equals the sum of active reservations |
+| K7 | Deadlock or lock pile-up between checkout, expiry and admin writes | Denial of service | One global lock order (ADR 0008), ascending ids, `releaseAll` aggregates per product; `lock_timeout` gives 503 (R43); `StockRaceIT` crossed-order variant (20 runs) asserts no 503 and no `deadlock detected` in the Postgres log |
+| K8 | Replayed or double-submitted checkout | Tampering | `Idempotency-Key` unique per customer; only 201 is stored; a replay returns the current order with `Idempotency-Replayed: true`; same key with another body is 422; a duplicate in flight waits on the unique row, then 409 `idempotency-in-progress` |
+| K9 | Idempotency key used across customers | Information disclosure | Key is unique per `(customer_subject, key)`; another customer's identical key is independent |
+| K10 | Hoarding stock without paying | Denial of service | 15 minute reservations, at most 3 pending orders, 20 lines, quantity 10 per line, per-product cap 10 across pending orders (409 `reservation-limit`); per account only (R36 in 4b, slice 5 rate limits). Both caps count only unpaid orders still inside their hold (`expires_at > now`): an overdue order keeps its stock until the expiry job releases it (every 30 s), so for up to that window a customer can reserve on top of it |
+| K11 | Expiry job misses or double-releases | Tampering | `SKIP LOCKED` batches of 50 under the order lock; release only `ACTIVE` reservations; two job instances over 250 orders release each once (`ReservationExpiryIT`); lazy expiry on cancel closes the gap between runs |
+| K12 | Input abuse: negative or fractional quantity, huge bodies, bad slugs or key | Tampering | Bounds 1 to 10, Jackson coercion off (400), `Idempotency-Key` typed as UUID, bodies on `/api/**` capped at 16 KiB before parsing (413 `body-too-large` first; a body with a non-JSON or missing `Content-Type` gets 415 `unsupported-media-type` before any read; Tomcat `max-http-form-post-size` is 16KB as defence in depth); on routes that never read a body (cancel, `DELETE` cart line) a body is discarded by Tomcat, not refused; type-mismatch problems carry a fixed message that names only the parameter and `instance` is the route pattern, so messages never echo input (`ProblemDetailEchoIT`) |
+| K13 | Inactive or unknown product in a cart or order | Tampering | `PUT` refuses it (404); checkout refuses an inactive product (409 `out-of-stock`); `DELETE` still removes it so a cart can always be emptied |
+| K14 | Spoofed email receives mail or claims an address | Spoofing | Only an `email` claim with `email_verified = true`, at most 254 characters and with a basic address shape, is stored (`CurrentUserTest`); mail itself comes in 4b |
+| K15 | Error text or logs leak data | Information disclosure | Problem details carry fixed messages and never the sent value; stock numbers are not returned, only `available` (R44); jobs log counts only |
+| K16 | Stale privileges after a customer is disabled | Elevation | Revalidation as in A9 (R42) |
+| K17 | A failed checkout leaves partial state | Tampering | One transaction; any 409 or failure rolls back reservation, order and key row, so a retry runs again |
+
 ## Residual risks
 
 | # | Risk | Impact | Planned handling |
@@ -124,18 +173,26 @@ Status: slice 3a matches the implemented code and its tests (API 100% line and b
 | R22 | `actor_name` is user-editable display data | Only `actor_subject` is evidence; a re-created local realm (R11) issues new subjects | Accepted; the API returns both, the audit table shows the name only |
 | R23 | A demoted admin can write for up to 5 minutes, and read for up to 15 with Keycloak down | See R14 | Accepted |
 | R24 | No rate limit on admin writes | Audit growth is unbounded; the audit page reaches `OFFSET` 1 000 000 (admin-only cost) | Slice 5 |
-| R25 | Admin request bodies are bounded only by Jackson's 100M-character string limit | An admin (or a hijacked admin session) can send very large bodies | Slice 5 gateway limits. Anonymous and customer bodies are refused before parsing |
+| R25 | Admin request bodies are bounded only by Jackson's 100M-character string limit | An admin (or a hijacked admin session) can send very large bodies | Slice 5 gateway limits. Anonymous and customer bodies are refused before parsing; from slice 4a customer bodies on `/api/**` are also capped at 16 KiB by an API filter (413, or 415 for a non-JSON body). Only `/api/admin/**` stays bounded by Jackson's limit |
 | R26 | The audit trace id is client-controlled | An untrusted correlation hint, never evidence | Accepted; labelled `Trace (unverified)` |
 | R27 | Actor names in the append-only log cannot be erased without the owner role | Personal data retention | Retention and erasure procedure (disable trigger, manual and logged) in the cloud guide |
 | R28 | A future audit export can carry CSV formula injection | Values starting with `=`, `+`, `-`, `@`, tab or CR | Neutralise those prefixes when an export is built |
-| R29 | Price and stock changes race with checkout | An order could use a stale price or stock | Slice 4 re-prices and re-checks stock under the stock row lock |
+| R29 | Price and stock changes race with checkout (closed) | An order could use a stale price or stock | Closed in slice 4a: checkout re-prices under `FOR SHARE` on the product rows (an admin price change waits) and reserves with a conditional stock update; order lines snapshot the price (K4, K6) |
 | R30 | On kind and dev the seed re-activates a deactivated seed product and overwrites an admin-created product whose slug a later seed adds; these rewrites of products and stock write no audit rows | Admin edits to seed data are not durable across seed changes and the audit log does not show seed changes | Accepted for local stacks; documented in ADR 0007 |
 | R31 | A write reported as 5xx may have committed | The admin may see an error for a change that happened | Safe to retry (version and slug idempotency); the web refetches after a 5xx |
 | R32 | Admin writes stay 503 for up to 5 minutes after Keycloak recovers (`Retry-After: 300`) until the next revalidation succeeds | Availability of admin writes only | Accepted |
 | R33 | Admin-supplied names can render visually empty or overlap nearby text | Confusing display; no script execution (React escapes, plain-text rule) | Accepted as admin-trusted content |
 | R34 | No `statement_timeout`: slow admin searches or deep audit pages hold pool connections shared with the public catalog | Admin-triggered pool pressure | Slice 5 |
 | R35 | Module write methods (`ProductAdministration`, `StockManagement`) require an existing transaction, so audit completeness depends on callers going through the admin service | A future caller inside its own transaction could change data without an audit row | Mitigated by `Propagation.MANDATORY` and the method guards, not eliminated; review new callers |
+| R37 | Cancel-and-reorder churn grows `orders`, `order_line`, `reservation` and `idempotency_key` without bound | Table growth and slower queries; idempotency keys are purged after 24 h | Slice 5 rate limits; retention for orders in the cloud guide |
+| R42 | Customer revocation lags up to `revalidate-after` (5 min), or the 15-minute grace with Keycloak down | A disabled customer can still use cart and checkout for that long | Accepted, as R14 and R23 |
+| R43 | Hot stock rows serialise checkouts; waits past `lock_timeout` (3 s) give 503 | A flash sale on one product shows errors to some customers; no oversell | Retry; slice 5 load tests (k6) |
+| R44 | `available` and `out-of-stock` reveal stock to signed-in customers | A competitor can probe whether a product is in stock. Setting a cart line to 1, 2, ... 10 and reading `available` on each `GET /api/cart` gives the exact free stock whenever it is 10 or less; `out-of-stock` at checkout gives the same answer. Larger stock stays hidden | Accepted |
+| R45 | Personal data at rest: `orders.email` (and, from 4b, mail in Mailpit) | Email addresses kept with orders; no erasure procedure yet | Retention and erasure procedure in the cloud guide |
+| R46 | Many concurrent `FOR SHARE` locks on a product (multixacts) delay an admin price change | An admin write waits, or gets 503 past `lock_timeout`, during heavy checkout | Accepted; retry |
+| R49 | A seed re-run during a rolling deploy can lock rows in another order than ascending id | A deadlock or 503 for one request; local stacks only (the seed does not run in the cloud) | Accepted for local |
+| R50 | The expiry job is the only bulk path that returns stock held by overdue orders (cancel releases lazily; reads do not write) | If the job stalls or a batch fails persistently, reserved stock leaks and products read as out of stock until it is fixed; nothing monitors the job yet | Alerting and job metrics in slice 5 (observability); until then the logs carry release counts only |
 
 ## Out of scope for this section
 
-Checkout, stock reservation, idempotency and payment webhooks (slice 4); TLS and HSTS, MFA, self-registration (cloud or later); supply chain signing (slice 6).
+Payment, webhooks, the outbox and email (slice 4b; R36, R38 to R41, R47 and R48 are reserved for it); TLS and HSTS, MFA, self-registration (cloud or later); supply chain signing (slice 6).

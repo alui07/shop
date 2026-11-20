@@ -1,6 +1,6 @@
 import { queryOptions, type QueryClient } from '@tanstack/react-query';
 import type { AdminSearch } from '@/lib/adminSearch';
-import { problemSchema, type Problem } from '@/lib/adminSchemas';
+import { problemSchema, type Problem } from '@/lib/problem';
 import type { components } from './schema';
 import { unwrap } from './catalog';
 import { apiClient } from './client';

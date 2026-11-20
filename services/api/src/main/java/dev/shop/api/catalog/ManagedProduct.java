@@ -1,5 +1,7 @@
 package dev.shop.api.catalog;
 
+import dev.shop.api.catalog.pricing.Money;
+
 /** A product as the administration sees it: inactive ones included, with the version used for optimistic locking. */
 public record ManagedProduct(
         long id,

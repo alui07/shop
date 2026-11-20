@@ -23,6 +23,9 @@ export function UserMenu({ me }: { me: Me }) {
   return (
     <div className="flex items-center gap-3">
       <span data-testid="user-name">{me.name ?? me.email ?? 'Signed in'}</span>
+      <Link to="/orders" className="rounded-sm px-1 hover:underline [&.active]:font-semibold">
+        Orders
+      </Link>
       {me.roles.includes('admin') && (
         <Link to="/admin" className="rounded-sm px-1 hover:underline [&.active]:font-semibold">
           Admin

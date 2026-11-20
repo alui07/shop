@@ -84,6 +84,9 @@ class SecurityConfiguration {
                             .permitAll()
                             .requestMatchers("/api/admin/**")
                             .hasRole("ADMIN")
+                            .requestMatchers(
+                                    "/api/cart", "/api/cart/**", "/api/checkout", "/api/orders", "/api/orders/**")
+                            .hasRole("CUSTOMER")
                             .anyRequest()
                             .denyAll();
                 })

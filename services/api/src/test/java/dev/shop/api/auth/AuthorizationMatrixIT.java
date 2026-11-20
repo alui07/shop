@@ -6,6 +6,7 @@ import dev.shop.api.support.AuthIT;
 import dev.shop.api.support.Identity;
 import dev.shop.api.support.TestBrowser;
 import java.net.http.HttpResponse;
+import java.util.List;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
@@ -19,6 +20,7 @@ import tools.jackson.databind.json.JsonMapper;
 class AuthorizationMatrixIT extends AuthIT {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
+    private static final String UNKNOWN_ORDER = "7f0f2a4e-5c1b-4f55-9d0a-2b0a4f3c9e11";
 
     static Stream<Arguments> safeRequests() {
         return Stream.of(
@@ -34,6 +36,13 @@ class AuthorizationMatrixIT extends AuthIT {
                 Arguments.of("/api/admin/audit", 401, 403, 200),
                 Arguments.of("/api/admin/audit?size=0", 401, 403, 400),
                 Arguments.of("/api/admin/nothing", 401, 403, 404),
+                Arguments.of("/api/cart", 401, 200, 200),
+                Arguments.of("/api/cart/lines/desk-lamp", 401, 405, 405),
+                Arguments.of("/api/checkout", 401, 405, 405),
+                Arguments.of("/api/orders", 401, 200, 200),
+                Arguments.of("/api/orders?size=0", 401, 400, 400),
+                Arguments.of("/api/orders/" + UNKNOWN_ORDER, 401, 404, 404),
+                Arguments.of("/api/orders/not-a-uuid", 401, 400, 400),
                 Arguments.of("/api/unknown", 401, 403, 403),
                 Arguments.of("/actuator/health", 401, 403, 403),
                 Arguments.of("/v3/api-docs", 200, 200, 200),
@@ -50,9 +59,43 @@ class AuthorizationMatrixIT extends AuthIT {
                 Arguments.of("PUT", "/api/admin/products/1/stock", 401, 403, 400),
                 Arguments.of("DELETE", "/api/admin/products/1", 401, 403, 405),
                 Arguments.of("POST", "/api/admin/audit", 401, 403, 405),
+                Arguments.of("PUT", "/api/cart/lines/desk-lamp", 401, 400, 400),
+                Arguments.of("DELETE", "/api/cart/lines/desk-lamp", 401, 200, 200),
+                Arguments.of("POST", "/api/cart", 401, 405, 405),
+                Arguments.of("POST", "/api/checkout", 401, 400, 400),
+                Arguments.of("POST", "/api/orders", 401, 405, 405),
+                Arguments.of("POST", "/api/orders/" + UNKNOWN_ORDER + "/cancel", 401, 404, 404),
                 Arguments.of("PUT", "/api/products/x", 401, 403, 403),
                 Arguments.of("DELETE", "/api/me", 401, 403, 403),
                 Arguments.of("POST", "/api/unknown", 401, 403, 403));
+    }
+
+    /**
+     * The first five are answered with 400 by argument binding, which runs before the method guards, so their 403
+     * proves the URL rule itself; the method guards alone would also forbid the rest.
+     */
+    static Stream<Arguments> customerRoutes() {
+        return Stream.of(
+                Arguments.of("GET", "/api/orders?size=0"),
+                Arguments.of("GET", "/api/orders/not-a-uuid"),
+                Arguments.of("POST", "/api/orders/not-a-uuid/cancel"),
+                Arguments.of("POST", "/api/checkout"),
+                Arguments.of("PUT", "/api/cart/lines/desk-lamp"),
+                Arguments.of("GET", "/api/orders/" + UNKNOWN_ORDER),
+                Arguments.of("GET", "/api/orders"),
+                Arguments.of("GET", "/api/cart"),
+                Arguments.of("DELETE", "/api/cart/lines/desk-lamp"),
+                Arguments.of("POST", "/api/orders/" + UNKNOWN_ORDER + "/cancel"));
+    }
+
+    @ParameterizedTest(name = "{0} {1} as a signed-in user without the customer role")
+    @MethodSource("customerRoutes")
+    void aSignedInUserWithoutTheCustomerRoleIsForbiddenOnEveryCustomerRoute(String method, String path) {
+        TestBrowser roleless = signedInAs(Identity.customer().withRoles(List.of()));
+        TestBrowser otherRole = signedInAs(Identity.customer().withRoles(List.of("support")));
+
+        assertThat(statusFor(roleless, method, path, true)).as("no roles").isEqualTo(403);
+        assertThat(statusFor(otherRole, method, path, true)).as("another role").isEqualTo(403);
     }
 
     @ParameterizedTest(name = "GET {0}")
@@ -83,7 +126,7 @@ class AuthorizationMatrixIT extends AuthIT {
     @ParameterizedTest(name = "{0} {1} without a CSRF token")
     @MethodSource("unsafeRequests")
     void unsafeRequestsWithoutACsrfTokenAreForbiddenForEveryone(String method, String path) throws Exception {
-        for (Supplier<TestBrowser> who : java.util.List.<Supplier<TestBrowser>>of(
+        for (Supplier<TestBrowser> who : List.<Supplier<TestBrowser>>of(
                 this::browser, () -> signedInAs(Identity.customer()), () -> signedInAs(Identity.admin()))) {
             TestBrowser browser = who.get();
             browser.get("/api/me");

@@ -170,6 +170,7 @@ public final class StubIdentityProvider implements AutoCloseable {
                 .claim("sid", identity.sessionId())
                 .claim("name", identity.name())
                 .claim("email", identity.email())
+                .claim("email_verified", identity.emailVerified())
                 .claim("preferred_username", identity.email())
                 .claim("roles", identity.roles());
         if (nonce != null) {

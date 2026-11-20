@@ -6,6 +6,7 @@ import java.sql.SQLException;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.beans.TypeMismatchException;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.dao.CannotAcquireLockException;
@@ -23,6 +24,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.validation.ObjectError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.context.request.ServletWebRequest;
+import org.springframework.web.servlet.HandlerMapping;
 
 @ExtendWith(OutputCaptureExtension.class)
 class ApiExceptionHandlerTest {
@@ -111,5 +113,33 @@ class ApiExceptionHandlerTest {
                         new Problems.FieldProblem("name", "must not be blank"),
                         new Problems.FieldProblem("productInput", "is inconsistent")));
         assertThat(problem.getType()).hasToString(Problems.VALIDATION);
+    }
+
+    @Test
+    void aTypeMismatchNamesTheParameterAndNeverTheValue() {
+        MockHttpServletRequest servletRequest = new MockHttpServletRequest("GET", "/api/orders/secret-id");
+        ServletWebRequest request = new ServletWebRequest(servletRequest);
+
+        for (String name : new String[] {"page", null}) {
+            TypeMismatchException exception = new TypeMismatchException("<script>secret", Integer.class);
+            exception.initPropertyName(name);
+
+            ResponseEntity<Object> response =
+                    handler.handleTypeMismatch(exception, new HttpHeaders(), HttpStatus.BAD_REQUEST, request);
+
+            ProblemDetail problem = (ProblemDetail) response.getBody();
+            assertThat(problem.getType()).hasToString(Problems.VALIDATION);
+            assertThat(problem.getDetail()).isEqualTo("The request is not valid");
+            assertThat(problem.getProperties().get("errors"))
+                    .isEqualTo(
+                            List.of(new Problems.FieldProblem(name == null ? "request" : name, "has the wrong type")));
+            assertThat(problem.toString()).doesNotContain("secret");
+        }
+
+        servletRequest.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/api/orders/{id}");
+        TypeMismatchException exception = new TypeMismatchException("secret-id", Integer.class);
+        ResponseEntity<Object> routed =
+                handler.handleTypeMismatch(exception, new HttpHeaders(), HttpStatus.BAD_REQUEST, request);
+        assertThat(((ProblemDetail) routed.getBody()).getInstance()).hasToString("/api/orders/%7Bid%7D");
     }
 }

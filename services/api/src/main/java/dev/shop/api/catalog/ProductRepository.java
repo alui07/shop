@@ -1,5 +1,6 @@
 package dev.shop.api.catalog;
 
+import dev.shop.api.catalog.pricing.Money;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.HashMap;

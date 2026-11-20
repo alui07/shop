@@ -61,17 +61,23 @@ export interface BrowserResponse {
   status: number;
   contentType: string;
   body: string;
+  headers: Record<string, string>;
 }
 
 // A same-origin fetch from the page, so the real session and CSRF cookies travel as in the SPA.
 export async function apiFetch(
   page: Page,
   path: string,
-  options: { method?: string; csrfToken?: string | null; json?: unknown } = {},
+  options: {
+    method?: string;
+    csrfToken?: string | null;
+    json?: unknown;
+    headers?: Record<string, string>;
+  } = {},
 ): Promise<BrowserResponse> {
   return page.evaluate(
-    async ({ path: target, method, csrfToken, json }) => {
-      const headers: Record<string, string> = {};
+    async ({ path: target, method, csrfToken, json, extraHeaders }) => {
+      const headers: Record<string, string> = { ...extraHeaders };
       if (csrfToken) headers['X-XSRF-TOKEN'] = csrfToken;
       if (json !== undefined) headers['Content-Type'] = 'application/json';
       const response = await fetch(target, {
@@ -84,6 +90,7 @@ export async function apiFetch(
         status: response.status,
         contentType: response.headers.get('content-type') ?? '',
         body: await response.text(),
+        headers: Object.fromEntries(response.headers.entries()),
       };
     },
     {
@@ -91,6 +98,7 @@ export async function apiFetch(
       method: options.method ?? 'GET',
       csrfToken: options.csrfToken ?? null,
       json: options.json,
+      extraHeaders: options.headers ?? {},
     },
   );
 }

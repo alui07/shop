@@ -2,7 +2,7 @@ package dev.shop.api.admin;
 
 import dev.shop.api.catalog.Category;
 import dev.shop.api.catalog.ManagedProduct;
-import dev.shop.api.catalog.Money;
+import dev.shop.api.catalog.pricing.Money;
 import dev.shop.api.inventory.StockLevel;
 
 record AdminProduct(

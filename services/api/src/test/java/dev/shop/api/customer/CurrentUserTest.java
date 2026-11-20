@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.TestingAuthenticationToken;
@@ -70,5 +71,57 @@ class CurrentUserTest {
                 .isInstanceOf(AccessDeniedException.class);
         assertThatThrownBy(() -> CurrentUser.of(signedIn(null, "A", "a"))).isInstanceOf(AccessDeniedException.class);
         assertThatThrownBy(() -> CurrentUser.of(signedIn(" ", "A", "a"))).isInstanceOf(AccessDeniedException.class);
+    }
+
+    private static Authentication withEmail(String email, Object emailVerified) {
+        OidcUser user = mock(OidcUser.class);
+        when(user.getSubject()).thenReturn("sub-1");
+        when(user.getEmail()).thenReturn(email);
+        when(user.getClaims()).thenReturn(emailVerified == null ? Map.of() : Map.of("email_verified", emailVerified));
+        return new TestingAuthenticationToken(user, null);
+    }
+
+    @Test
+    void keepsTheEmailOnlyWhenTheProviderSaysItIsVerified() {
+        assertThat(CurrentUser.of(withEmail("a@example.test", true)).verifiedEmail())
+                .isEqualTo("a@example.test");
+        assertThat(CurrentUser.of(withEmail("a@example.test", false)).verifiedEmail())
+                .isNull();
+        assertThat(CurrentUser.of(withEmail("a@example.test", null)).verifiedEmail())
+                .isNull();
+    }
+
+    @Test
+    void aStringTrueIsNotAVerifiedClaim() {
+        assertThat(CurrentUser.of(withEmail("a@example.test", "true")).verifiedEmail())
+                .isNull();
+    }
+
+    @Test
+    void dropsAnEmailThatIsMissingTooLongOrNotShapedLikeAnAddress() {
+        String longest = "a".repeat(242) + "@example.test";
+        assertThat(longest).hasSize(255);
+
+        assertThat(CurrentUser.of(withEmail(null, true)).verifiedEmail()).isNull();
+        assertThat(CurrentUser.of(withEmail(longest, true)).verifiedEmail()).isNull();
+        assertThat(CurrentUser.of(withEmail(longest.substring(1), true)).verifiedEmail())
+                .hasSize(254);
+        assertThat(CurrentUser.of(withEmail("no-at-sign", true)).verifiedEmail())
+                .isNull();
+        assertThat(CurrentUser.of(withEmail("two words@example.test", true)).verifiedEmail())
+                .isNull();
+        assertThat(CurrentUser.of(withEmail("a@example.test\r\nBcc: x@y.test", true))
+                        .verifiedEmail())
+                .isNull();
+        for (String control : new String[] {"a\u0000b@example.test", "a@exa\u0085mple.test", "a@example.test\u2028"}) {
+            assertThat(CurrentUser.of(withEmail(control, true)).verifiedEmail())
+                    .as(control)
+                    .isNull();
+        }
+    }
+
+    @Test
+    void theTwoArgumentConstructorHasNoEmail() {
+        assertThat(new CurrentUser("s", "n").verifiedEmail()).isNull();
     }
 }

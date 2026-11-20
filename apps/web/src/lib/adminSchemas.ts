@@ -70,17 +70,6 @@ export const stockFormSchema = z.object({
 export type ProductFormValues = z.input<typeof productFormSchema>;
 export type StockFormValues = z.input<typeof stockFormSchema>;
 
-const fieldErrorSchema = z.object({ field: z.string(), message: z.string() });
-
-export const problemSchema = z.object({
-  type: z.string().optional(),
-  detail: z.string().optional(),
-  errors: z.array(fieldErrorSchema).default([]),
-});
-
-export type Problem = z.output<typeof problemSchema>;
-export type FieldProblem = z.output<typeof fieldErrorSchema>;
-
 export const VALIDATION_TYPE = 'tag:shop.dev,2026:validation';
 export const DUPLICATE_SLUG_TYPE = 'tag:shop.dev,2026:duplicate-slug';
 export const VERSION_CONFLICT_TYPE = 'tag:shop.dev,2026:version-conflict';

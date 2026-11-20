@@ -1,13 +1,8 @@
 import { Link } from '@tanstack/react-router';
 import type { components } from '@/api/schema';
+import { formatDateTime } from '@/lib/dateTime';
 
 type AuditEvent = components['schemas']['AuditEvent'];
-
-const TIME_FORMAT = new Intl.DateTimeFormat('en', {
-  dateStyle: 'medium',
-  timeStyle: 'long',
-  timeZone: 'UTC',
-});
 
 function Value({ value }: { value: string | null }) {
   return <bdi>{value ?? '(none)'}</bdi>;
@@ -43,9 +38,7 @@ export function AuditTable({ events }: { events: readonly AuditEvent[] }) {
         {events.map((event) => (
           <tr key={event.id} className="border-b align-top">
             <td className="py-2 pr-4">
-              <time dateTime={event.occurredAt}>
-                {TIME_FORMAT.format(new Date(event.occurredAt))}
-              </time>
+              <time dateTime={event.occurredAt}>{formatDateTime(event.occurredAt)}</time>
             </td>
             <td className="py-2 pr-4">
               <bdi>{event.actorName}</bdi>

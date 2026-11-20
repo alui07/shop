@@ -1,6 +1,8 @@
 package dev.shop.api.web;
 
 import dev.shop.api.web.Problems.FieldProblem;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Objects;
@@ -8,8 +10,8 @@ import java.util.stream.Collectors;
 import org.apache.tomcat.util.http.InvalidParameterException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.TypeMismatchException;
 import org.springframework.dao.DataAccessException;
-import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -25,9 +27,12 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.RequestAttributes;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
+import org.springframework.web.servlet.HandlerMapping;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
+import org.springframework.web.util.UriUtils;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.exc.MismatchedInputException;
 
@@ -36,7 +41,6 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ApiExceptionHandler.class);
     private static final String LOCK_RETRY_AFTER_SECONDS = "3";
-    private static final String LOCK_NOT_AVAILABLE = "55P03";
 
     @ExceptionHandler(InvalidParameterException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
@@ -87,10 +91,35 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
                 exception, Problems.validation("The request is not valid", errors), headers, status, request);
     }
 
-    /** A JSON value of the wrong type names its property; anything else unreadable keeps Spring's answer. */
+    /**
+     * Spring's default message quotes the rejected value; this one names only the parameter, and the instance is the
+     * route pattern, not the requested path.
+     */
+    @Override
+    protected ResponseEntity<Object> handleTypeMismatch(
+            TypeMismatchException exception, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
+        String parameter = exception.getPropertyName() == null ? "request" : exception.getPropertyName();
+        ProblemDetail problem = Problems.validation(
+                "The request is not valid", List.of(new FieldProblem(parameter, "has the wrong type")));
+        Object route =
+                request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, RequestAttributes.SCOPE_REQUEST);
+        if (route != null) {
+            problem.setInstance(URI.create(UriUtils.encodePath(route.toString(), StandardCharsets.UTF_8)));
+        }
+        return handleExceptionInternal(exception, problem, headers, status, request);
+    }
+
+    /**
+     * A body that ran past the size limit while being read is a 413; a JSON value of the wrong type names its
+     * property; anything else unreadable keeps Spring's answer.
+     */
     @Override
     protected ResponseEntity<Object> handleHttpMessageNotReadable(
             HttpMessageNotReadableException exception, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
+        if (causedByOversizedBody(exception)) {
+            return handleExceptionInternal(
+                    exception, RequestBodyLimitFilter.tooLarge(), headers, HttpStatus.CONTENT_TOO_LARGE, request);
+        }
         if (exception.getCause() instanceof MismatchedInputException mismatch
                 && !mismatch.getPath().isEmpty()) {
             String field = mismatch.getPath().stream()
@@ -110,9 +139,7 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
      */
     @ExceptionHandler(DataAccessException.class)
     ResponseEntity<ProblemDetail> handleDataAccess(DataAccessException exception) {
-        SQLException sql = firstSqlException(exception);
-        if (exception instanceof PessimisticLockingFailureException
-                || (sql != null && LOCK_NOT_AVAILABLE.equals(sql.getSQLState()))) {
+        if (LockFailures.isLockTimeout(exception)) {
             LOGGER.warn(
                     "A row lock could not be taken in time: {}",
                     exception.getClass().getSimpleName());
@@ -121,6 +148,7 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
                     .body(ProblemDetail.forStatusAndDetail(
                             HttpStatus.SERVICE_UNAVAILABLE, "The product is busy; try again shortly"));
         }
+        SQLException sql = LockFailures.firstSqlException(exception);
         if (sql != null) {
             // The database message can carry the offending row, which holds product text.
             LOGGER.error(
@@ -141,13 +169,13 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         return unexpectedProblem();
     }
 
-    private static SQLException firstSqlException(Throwable failure) {
+    private static boolean causedByOversizedBody(Throwable failure) {
         for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
-            if (cause instanceof SQLException sql) {
-                return sql;
+            if (cause instanceof BodyTooLargeException) {
+                return true;
             }
         }
-        return null;
+        return false;
     }
 
     private static ProblemDetail unexpectedProblem() {

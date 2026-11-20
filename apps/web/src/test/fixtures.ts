@@ -99,3 +99,60 @@ export function auditPage(
 ): AuditPage {
   return { items, page, size: 20, totalItems, totalPages };
 }
+
+type Cart = components['schemas']['Cart'];
+type CartLine = components['schemas']['CartLine'];
+type Order = components['schemas']['Order'];
+type OrderPage = components['schemas']['OrderPage'];
+
+export function cartLine(slug: string, name: string, quantity = 1, available = true): CartLine {
+  const unitPrice = { amountMinor: 5000, currency: 'EUR' };
+  return {
+    productSlug: slug,
+    name,
+    unitPrice,
+    quantity,
+    lineTotal: { amountMinor: 5000 * quantity, currency: 'EUR' },
+    available,
+  };
+}
+
+export function cartOf(lines: CartLine[], version = 3): Cart {
+  const itemCount = lines.reduce((sum, line) => sum + line.quantity, 0);
+  const amountMinor = lines.reduce((sum, line) => sum + line.lineTotal.amountMinor, 0);
+  return { version, lines, itemCount, total: { amountMinor, currency: 'EUR' } };
+}
+
+export const ORDER_ID = '11111111-1111-4111-8111-111111111111';
+
+export function orderOf(overrides: Partial<Order> = {}): Order {
+  return {
+    id: ORDER_ID,
+    status: 'PENDING_PAYMENT',
+    createdAt: '2026-11-19T10:00:00Z',
+    expiresAt: '2999-01-01T10:15:00Z',
+    lines: [cartLine('oak-chair', 'Oak chair', 2)],
+    total: { amountMinor: 10000, currency: 'EUR' },
+    ...overrides,
+  };
+}
+
+export function orderPage(
+  orders: Order[],
+  { page = 0, totalPages = 1, totalItems = orders.length } = {},
+): OrderPage {
+  return {
+    items: orders.map((order) => ({
+      id: order.id,
+      status: order.status,
+      createdAt: order.createdAt,
+      expiresAt: order.expiresAt,
+      itemCount: order.lines.reduce((sum, line) => sum + line.quantity, 0),
+      total: order.total,
+    })),
+    page,
+    size: 20,
+    totalItems,
+    totalPages,
+  };
+}
