@@ -21,6 +21,7 @@ public final class Problems {
     public static final String IDEMPOTENCY_IN_PROGRESS = "tag:shop.dev,2026:idempotency-in-progress";
     public static final String IDEMPOTENCY_KEY_REUSED = "tag:shop.dev,2026:idempotency-key-reused";
     public static final String BODY_TOO_LARGE = "tag:shop.dev,2026:body-too-large";
+    public static final String UNSUPPORTED_MEDIA_TYPE = "tag:shop.dev,2026:unsupported-media-type";
 
     private Problems() {}
 

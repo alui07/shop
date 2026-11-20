@@ -1,6 +1,6 @@
 # shop
 
-Spring Boot API (`services/api`) and React web app (`apps/web`). Visitors can browse a seeded product catalog: search, filter by category, sort, page through results and open a product page. Users sign in through Keycloak; admins manage products and stock and read an audit log. Every tool runs in a pinned container; `make` is the only entry point, locally and in CI.
+Spring Boot API (`services/api`) and React web app (`apps/web`). Visitors can browse a seeded product catalog: search, filter by category, sort, page through results and open a product page. Users sign in through Keycloak; customers fill a cart, check out and cancel or watch their orders; admins manage products and stock and read an audit log. Every tool runs in a pinned container; `make` is the only entry point, locally and in CI.
 
 ## Prerequisites
 
@@ -57,6 +57,10 @@ Web routes:
 | `/` | Product catalog. Search, category, sort and page live in the URL (`?q=&category=&sort=&page=`), so views can be bookmarked and shared. `page` is 1-based in the URL |
 | `/products/$slug` | One product |
 | `/status` | API status and version |
+| `/cart` | Customer: cart lines with quantity, line totals and availability |
+| `/checkout` | Customer: review the cart and place the order |
+| `/orders` | Customer: own orders, newest first, paged |
+| `/orders/$id` | Customer: one order with status, `Reserved until`, snapshot unit price, line totals and `Cancel order` |
 | `/admin` | Admin area. Anonymous visitors get a sign-in prompt, customers a "no access" panel, admins the product table (search and paging, inactive products included) with a link per product to its edit page |
 | `/admin/products/new` | Admin only: create a product |
 | `/admin/products/$id` | Admin only: edit a product (name, description, price, category, active) and set its stock |
@@ -78,11 +82,22 @@ API endpoints (all under `/api`, errors are RFC 9457 Problem Details):
 | `GET /api/admin/products/{id}`, `PUT /api/admin/products/{id}` | Admin only: read or update a product. The body carries the `version` you read; a stale one gets 409. The slug cannot change; `active` is part of the body |
 | `PUT /api/admin/products/{id}/stock` | Admin only: set `onHand` (with the stock `version`); never below `reserved` |
 | `GET /api/admin/audit?page=&size=` | Admin only: audit events, newest first |
+| `GET /api/cart` | Customer: the cart (an absent cart is version 0 and empty) |
+| `PUT /api/cart/lines/{slug}`, `DELETE /api/cart/lines/{slug}` | Customer: set a line's quantity (1 to 10, at most 20 lines; 404 for an unknown or inactive product) or remove it (always 200) |
+| `POST /api/checkout` | Customer: needs an `Idempotency-Key` UUID header and `{cartVersion, expectedTotalMinor}`. 201 with the order and `Location`; a repeated key returns the order's current state with `Idempotency-Replayed: true` |
+| `GET /api/orders?page=&size=`, `GET /api/orders/{id}` | Customer: own orders only (another customer's id is 404); `size` is 1 to 50 |
+| `POST /api/orders/{id}/cancel` | Customer: cancel an unpaid order and release its stock |
 | `POST /logout` | Signed-in users, CSRF token required. Ends the session and answers `{"redirectUrl"}` for Keycloak's end-session page |
 
 Unsafe requests (POST, PUT, PATCH, DELETE) need the `X-XSRF-TOKEN` header matching the `__Host-XSRF-TOKEN` cookie, otherwise 403. Everything not listed is denied: an unknown `/api` path returns 401 to anonymous callers and 403 to signed-in ones (it used to be 404), and `/actuator/env` and `/actuator/info` on the management port return 401. Admin endpoints answer 401 to anonymous callers and 403 to customers, and send `Cache-Control: no-store`. Validation errors are 400 and conflicts 409 with `application/problem+json` and an `errors` array; a row lock held longer than 3 s gives 503 with `Retry-After: 3`. Admin writes also give 503 when the last successful check with Keycloak is older than 5 minutes (a demoted admin cannot keep writing while Keycloak is down), with `Retry-After: 300`; writes can stay at 503 for up to 5 minutes after Keycloak recovers.
 
 The contract is committed as `services/api/openapi/openapi.json`; the design is in `docs/adr/0003-catalog-data-and-api.md`.
+
+### Cart, checkout and orders
+
+A signed-in customer (role `customer`) sets product quantities in a cart stored in Postgres (`Add to cart` sets the line's quantity, it does not add to what is already there; on the cart page, changing the quantity or `Remove` greys out and ignores further input while a change is pending, and after `Remove` focus moves to the `Cart` heading). Checkout re-prices the cart under locks, reserves stock for 15 minutes and creates an order in `PENDING_PAYMENT`, shown as `Awaiting payment`. There is no payment yet: the customer can cancel (`Cancelled`) or the hold runs out and a background job releases the stock (`Expired`). Unsafe cart and order calls need the CSRF header like all others. Anonymous visitors see `Sign in to buy` on product pages.
+
+Rules and settings (`shop.checkout.*`, defaults in `CheckoutProperties`): hold time `reservation-ttl` 15 minutes; at most 3 unpaid orders per customer (`max-pending-orders`); at most 10 of one product reserved across a customer's unpaid orders (`max-reserved-per-product`); idempotency keys live 24 hours (`idempotency-ttl`); the expiry job runs every 30 s in batches of 50 and an hourly job deletes expired keys. Conflicts are 409 problems with an `errors` array: `cart-changed`, `price-changed`, `out-of-stock`, `cart-full`, `too-many-pending-orders`, `reservation-limit`, `order-state`, `idempotency-in-progress`; a reused key with another body is 422 `idempotency-key-reused`. Customer request bodies on `/api/**` are capped at 16 KiB (413 `body-too-large`), and a body that is not `application/json` gets 415 `unsupported-media-type` before it is read; the cap applies to routes that read a body, so a body sent to cancel or `DELETE` of a cart line is discarded by Tomcat rather than refused. Bad parameter types give a fixed 400 message that names only the parameter. Design and lock order: `docs/adr/0008-checkout-and-stock-reservation.md`.
 
 ### Admin writes locally
 
@@ -151,8 +166,8 @@ build/                      gitignored reports
 
 - `docs/plans/`: the master plan, the brief for each slice and `STATUS.md`. Start with `docs/plans/README.md` to see where the work stands and how to resume it.
 - `tests/`: every kind of test, what it proves and how to run it, how the end-to-end stack works and how to debug it (`tests/README.md`). Unit and integration tests live next to the code in each app.
-- `docs/adr/`: why the tooling, testing, catalog API, web security headers, local Kubernetes cluster, authentication and admin writes are set up this way.
-- `docs/threat-model.md`: assets, trust boundaries, threats and residual risks of sign-in, sessions and admin writes.
+- `docs/adr/`: why the tooling, testing, catalog API, web security headers, local Kubernetes cluster, authentication, admin writes and checkout with stock reservation are set up this way.
+- `docs/threat-model.md`: assets, trust boundaries, threats and residual risks of sign-in, sessions, admin writes and checkout.
 
 ## Manual steps
 
@@ -168,6 +183,7 @@ Some things cannot be automated: first-time Docker group setup, checking the fir
 - Catalog search matches whole words only: no prefixes and no typo tolerance (`docs/adr/0003-catalog-data-and-api.md`).
 - Products have no images yet; the web app shows a placeholder.
 - The Vite dev server does not enforce the Content Security Policy; only the built web image does (`docs/adr/0004-web-security-headers.md`).
+- Checkout (slice 4a) has no payment: an order ends only in `Cancelled` or `Expired`. The limits (3 unpaid orders, 10 of a product, 20 lines) are per account, there is no rate limit until slice 5, and cancel-and-reorder churn grows the order tables without retention (`docs/threat-model.md`, R37). Hot stock rows can answer 503 under heavy contention (R43). `available` on a cart line lets a customer learn exact free stock when it is 10 or less (R44). The expiry job is the only bulk path that returns stock from overdue orders and is not monitored until slice 5 (R50); an overdue order keeps its stock for up to 30 s after it stops counting toward the caps. `orders.email` stores the verified email at checkout as personal data (R45). A customer disabled in Keycloak can keep using cart and checkout for up to about 5 minutes (R42).
 - Spring Security now sets the API's security headers; HSTS waits for the TLS-terminating Gateway. Keycloak runs with `sslRequired: external`, so it accepts plain http only from localhost and private addresses; the cloud setup uses `all`.
 - Cookies are not port-scoped: `__Host-SESSION` and `__Host-XSRF-TOKEN` from `localhost:8088` are also sent to Keycloak on `localhost:8089`, and the XSRF cookie is script-readable there. Separation needs distinct hostnames (`docs/threat-model.md`, R4).
 - No rate limiting until slice 5. Keycloak's brute-force protection sees only the gateway address, so anyone can lock out an account.
@@ -178,7 +194,7 @@ Some things cannot be automated: first-time Docker group setup, checking the fir
 - Keycloak's image scan fails only on fixable CRITICAL findings; HIGH is reported (gated in slice 6).
 - Until 2026-12-02 `scan-web` ignores 6 HIGH nginx 1.30.6 CVEs (HTTP/2, HTTP/3, TLS, mail, proxy with SSI or mirror; none reachable with `apps/web/nginx.conf`) in `apps/web/.trivyignore.yaml`, pending the nginx-unprivileged 1.30.7 image.
 - Playwright traces from failed e2e runs record typed test passwords (`tests/README.md`).
-- Admin writes: the slug cannot change after create; a product is hidden by clearing `Active`, never deleted. Admins set `onHand`; `reserved` belongs to checkout (slice 4). There is no audit filter or export and no rate limit on writes until slice 5. The audit log is append-only by database triggers, but the database owner role can disable them (`docs/threat-model.md`, R21).
+- Admin writes: the slug cannot change after create; a product is hidden by clearing `Active`, never deleted. Admins set `onHand`; `reserved` belongs to checkout (slice 4a). There is no audit filter or export and no rate limit on writes until slice 5. The audit log is append-only by database triggers, but the database owner role can disable them (`docs/threat-model.md`, R21).
 - A demoted admin can still write for up to 5 minutes while Keycloak is up. With Keycloak down, admin writes get 503 once the last success is older than 5 minutes, while reads continue to the 15-minute grace.
 - On dev and kind, changing the seed file re-activates a seed product an admin deactivated and overwrites an admin-created product with the same slug. Stock rows an admin edited are kept.
 - The first `make dev` is slow while Maven downloads dependencies into `.cache/m2`.

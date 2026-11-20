@@ -143,4 +143,21 @@ class RequestBodyLimitFilterTest {
         @Override
         public void onError(Throwable throwable) {}
     }
+
+    @Test
+    void onlyApplicationJsonAndApplicationPlusJsonBodiesPass() throws Exception {
+        for (String type : new String[] {"text/x+json", "application/xml", "application/x-www-form-urlencoded"}) {
+            MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/x");
+            request.setContentType(type);
+            request.setContent(new byte[] {'a'});
+            MockHttpServletResponse response = new MockHttpServletResponse();
+
+            filter.doFilter(request, response, (req, res) -> {
+                throw new AssertionError("the request must be refused");
+            });
+
+            assertThat(response.getStatus()).as(type).isEqualTo(415);
+            assertThat(response.getContentAsString()).doesNotContain(type);
+        }
+    }
 }

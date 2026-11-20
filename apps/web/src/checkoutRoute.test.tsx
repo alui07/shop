@@ -148,6 +148,32 @@ describe('checkout view', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe(`/orders/${ORDER_ID}`));
   });
 
+  it('keeps focus where the user put it when the cart reloads after an alert', async () => {
+    let cartCalls = 0;
+    let reloadCart: () => void = () => {};
+    const reloaded = new Promise<void>((resolve) => (reloadCart = resolve));
+    stubCheckout(
+      () => problem(409, 'cart-changed'),
+      async () => {
+        if (++cartCalls > 1) await reloaded;
+        return jsonResponse(cart);
+      },
+    );
+    renderApp('/checkout');
+
+    await placeOrderClick();
+    const alert = await screen.findByRole('alert');
+    await waitFor(() => expect(cartCalls).toBe(2));
+    const placeOrder = screen.getByRole('button', { name: 'Place order' });
+    placeOrder.focus();
+    reloadCart();
+    await waitFor(() => expect(document.activeElement).toBe(placeOrder));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(document.activeElement).toBe(placeOrder);
+    expect(alert.isConnected).toBe(true);
+  });
+
   it('says the cart is empty without offering to place an order', async () => {
     stubCheckout(
       () => jsonResponse(orderOf(), 201),

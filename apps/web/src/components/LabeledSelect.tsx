@@ -10,11 +10,13 @@ export function LabeledSelect({
   value,
   options,
   onChange,
+  busy = false,
 }: {
   label: string;
   value: string;
   options: readonly SelectOption[];
   onChange: (value: string) => void;
+  busy?: boolean;
 }) {
   const id = useId();
   return (
@@ -25,6 +27,7 @@ export function LabeledSelect({
       <select
         id={id}
         value={value}
+        aria-disabled={busy || undefined}
         onChange={(event) => onChange(event.target.value)}
         className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-xs focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
       >

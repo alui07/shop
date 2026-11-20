@@ -14,7 +14,7 @@ public record CurrentUser(String subject, String displayName, String verifiedEma
 
     private static final int MAX_DISPLAY_NAME_CODE_POINTS = 200;
     private static final int MAX_EMAIL_LENGTH = 254;
-    private static final Pattern EMAIL_SHAPE = Pattern.compile("[^\\s@]+@[^\\s@]+");
+    private static final Pattern EMAIL_SHAPE = Pattern.compile("[^\\s\\p{Cc}\\p{Z}@]+@[^\\s\\p{Cc}\\p{Z}@]+");
 
     public CurrentUser(String subject, String displayName) {
         this(subject, displayName, null);

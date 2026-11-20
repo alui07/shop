@@ -9,8 +9,11 @@ import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.InvalidMediaTypeException;
 import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -18,7 +21,8 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Caps customer request bodies. A declared length over the limit is refused before anything is read; a body with no
- * declared length (chunked) is counted as it is read and fails at one byte over. Admin bodies keep their own bounds.
+ * declared length (chunked) is counted as it is read and fails at one byte over. A body that is not JSON is refused
+ * with 415 before it is read. Admin bodies keep their own bounds.
  */
 final class RequestBodyLimitFilter extends OncePerRequestFilter {
 
@@ -43,25 +47,55 @@ final class RequestBodyLimitFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         if (request.getContentLengthLong() > LIMIT_BYTES) {
-            refuse(response);
+            refuse(response, tooLarge());
+            return;
+        }
+        if (hasBody(request) && !isJson(request.getContentType())) {
+            refuse(response, unsupportedMediaType());
             return;
         }
         chain.doFilter(new LimitedRequest(request), response);
     }
 
-    private void refuse(HttpServletResponse response) throws IOException {
-        response.setStatus(HttpStatus.CONTENT_TOO_LARGE.value());
+    /** Form bodies would otherwise be parsed by the servlet container, outside the counted stream. */
+    private static boolean hasBody(HttpServletRequest request) {
+        return request.getContentLengthLong() > 0 || request.getHeader(HttpHeaders.TRANSFER_ENCODING) != null;
+    }
+
+    private static boolean isJson(String contentType) {
+        if (contentType == null) {
+            return false;
+        }
+        try {
+            MediaType type = MediaType.parseMediaType(contentType);
+            return MediaType.APPLICATION_JSON.equalsTypeAndSubtype(type)
+                    || ("application".equalsIgnoreCase(type.getType())
+                            && type.getSubtype().toLowerCase(Locale.ROOT).endsWith("+json"));
+        } catch (InvalidMediaTypeException e) {
+            return false;
+        }
+    }
+
+    private void refuse(HttpServletResponse response, ProblemDetail problem) throws IOException {
+        response.setStatus(problem.getStatus());
         response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
         response.setCharacterEncoding("UTF-8");
         response.setHeader("Connection", "close");
-        ProblemDetail problem = tooLarge();
         response.getWriter()
                 .write(jsonMapper.writeValueAsString(Map.of(
-                        "type", Problems.BODY_TOO_LARGE,
-                        "title", HttpStatus.CONTENT_TOO_LARGE.getReasonPhrase(),
-                        "status", HttpStatus.CONTENT_TOO_LARGE.value(),
-                        "detail", problem.getDetail(),
+                        "type", String.valueOf(problem.getType()),
+                        "title", HttpStatus.valueOf(problem.getStatus()).getReasonPhrase(),
+                        "status", problem.getStatus(),
+                        "detail", String.valueOf(problem.getDetail()),
                         "errors", List.of())));
+    }
+
+    private static ProblemDetail unsupportedMediaType() {
+        return Problems.problem(
+                HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+                Problems.UNSUPPORTED_MEDIA_TYPE,
+                "The request body must be application/json",
+                List.of());
     }
 
     static ProblemDetail tooLarge() {

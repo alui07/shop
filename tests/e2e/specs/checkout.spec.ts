@@ -165,9 +165,8 @@ test('a customer adds two, places the order and sees it awaiting payment at the 
   await expect(customer.getByRole('heading', { level: 1, name: 'Order' })).toBeVisible();
   await expect(customer.getByText('Awaiting payment', { exact: true })).toBeVisible();
   await expect(customer.getByText(product.name).first()).toBeVisible();
-  // The order view shows quantity and line total (2 x the snapshot price of 12.50), not the unit price.
   await expect(customer.getByRole('listitem').filter({ hasText: product.name })).toContainText(
-    /× 2\s*€25\.00/,
+    /× 2\s*€25\.00\s*€12\.50 each/,
   );
   await expect(customer.getByText('Total €25.00')).toBeVisible();
   await expect(customer.getByText(/Reserved until/)).toBeVisible();

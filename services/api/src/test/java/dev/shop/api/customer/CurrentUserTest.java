@@ -113,6 +113,11 @@ class CurrentUserTest {
         assertThat(CurrentUser.of(withEmail("a@example.test\r\nBcc: x@y.test", true))
                         .verifiedEmail())
                 .isNull();
+        for (String control : new String[] {"a\u0000b@example.test", "a@exa\u0085mple.test", "a@example.test\u2028"}) {
+            assertThat(CurrentUser.of(withEmail(control, true)).verifiedEmail())
+                    .as(control)
+                    .isNull();
+        }
     }
 
     @Test

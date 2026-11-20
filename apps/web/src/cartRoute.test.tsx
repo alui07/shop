@@ -102,6 +102,56 @@ describe('cart view', () => {
     expect(screen.queryByText('Pine chair')).toBeNull();
   });
 
+  it('keeps the line controls focusable but inert while a change is pending', async () => {
+    let finish: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (finish = resolve));
+    const put = vi.fn(async () => {
+      await gate;
+      return jsonResponse(cartOf([cartLine('oak-chair', 'Oak chair', 4)]));
+    });
+    stubShop(customerMe, () => jsonResponse(twoLines), { '/api/cart/lines/oak-chair': put });
+    renderApp('/cart');
+
+    const select = (await screen.findByLabelText('Quantity of Oak chair')) as HTMLSelectElement;
+    select.focus();
+    fireEvent.change(select, { target: { value: '4' } });
+
+    await waitFor(() => expect(select.getAttribute('aria-disabled')).toBe('true'));
+    expect(screen.getByLabelText('Quantity of Pine chair').getAttribute('aria-disabled')).toBe(
+      'true',
+    );
+    const removeButtons = screen.getAllByRole('button', { name: 'Remove' });
+    for (const button of removeButtons) expect(button.getAttribute('aria-disabled')).toBe('true');
+    expect(document.activeElement).toBe(select);
+
+    fireEvent.change(select, { target: { value: '5' } });
+    fireEvent.click(removeButtons[0] as HTMLElement);
+    expect(put).toHaveBeenCalledTimes(1);
+
+    finish();
+
+    await waitFor(() => expect(select.getAttribute('aria-disabled')).toBeNull());
+    expect(document.activeElement).toBe(select);
+  });
+
+  it('moves focus to the heading after a line is removed', async () => {
+    stubShop(customerMe, () => jsonResponse(twoLines), {
+      '/api/cart/lines/pine-chair': () =>
+        jsonResponse(cartOf([cartLine('oak-chair', 'Oak chair', 2)])),
+    });
+    renderApp('/cart');
+
+    const row = (await screen.findByText('Pine chair')).closest('li') as HTMLElement;
+    const remove = within(row).getByRole('button', { name: 'Remove' });
+    remove.focus();
+    fireEvent.click(remove);
+
+    await waitFor(() => expect(screen.queryByText('Pine chair')).toBeNull());
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1 })),
+    );
+  });
+
   it('removes a line', async () => {
     stubShop(customerMe, () => jsonResponse(twoLines), {
       '/api/cart/lines/pine-chair': () =>

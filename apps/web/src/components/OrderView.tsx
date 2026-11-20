@@ -53,7 +53,10 @@ function OrderDetails({ order }: { order: Order }) {
             <span>
               {line.name} × {line.quantity}
             </span>
-            <span>{formatPrice(line.lineTotal)}</span>
+            <div className="text-right">
+              <p>{formatPrice(line.lineTotal)}</p>
+              <p className="text-sm">{formatPrice(line.unitPrice)} each</p>
+            </div>
           </li>
         ))}
       </ul>

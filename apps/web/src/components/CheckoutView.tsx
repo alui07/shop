@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { cartQuery } from '@/api/cart';
 import { orderQuery } from '@/api/orders';
 import type { ProblemError } from '@/api/problemError';
@@ -55,6 +55,8 @@ export function CheckoutView() {
   const [placing, setPlacing] = useState(false);
   const [problems, setProblems] = useState<Problems>();
 
+  const focusWhenShown = useCallback((element: HTMLDivElement | null) => element?.focus(), []);
+
   const gate = customerGate(error);
   if (gate) return gate;
 
@@ -86,7 +88,7 @@ export function CheckoutView() {
         <div
           role="alert"
           tabIndex={-1}
-          ref={(element) => element?.focus()}
+          ref={focusWhenShown}
           className="space-y-2 rounded-md border border-destructive p-3 text-sm"
         >
           <p>{problems.alert}</p>

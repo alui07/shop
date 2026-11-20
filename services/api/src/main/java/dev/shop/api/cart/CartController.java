@@ -71,6 +71,13 @@ class CartController {
                     @Content(
                             mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
                             schema = @Schema(implementation = ProblemDetail.class)))
+    @ApiResponse(
+            responseCode = "415",
+            description = "Request body is not JSON (unsupported-media-type)",
+            content =
+                    @Content(
+                            mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+                            schema = @Schema(implementation = ProblemDetail.class)))
     ResponseEntity<Cart> putCartLine(
             @PathVariable @Size(max = 100) @Pattern(regexp = NO_CONTROL_CHARACTERS) String slug,
             @Valid @RequestBody CartLineInput input,

@@ -1095,6 +1095,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            /** @description Request body is not JSON (unsupported-media-type) */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Internal Server Error */
             500: {
                 headers: {
@@ -1313,6 +1322,15 @@ export interface operations {
             };
             /** @description Request body over 16 KiB (body-too-large) */
             413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Request body is not JSON (unsupported-media-type) */
+            415: {
                 headers: {
                     [name: string]: unknown;
                 };

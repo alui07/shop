@@ -126,6 +126,30 @@ Run these on `make dev` (http://localhost:5173) as `admin@example.test` unless a
   - Steps: on a cluster deployed from the 3a branch (`make cluster-up deploy`), switch to this branch and run `make deploy`. Check `make kubectl ARGS="-n shop logs deploy/api"` for Flyway.
   - Expected: Flyway applies V3, V4 and V5 without waiting on a lock (each begins with a 5 s lock timeout), every product has a stock row, and the catalog still works.
 
+## Cart and checkout (slice 4a)
+
+Run these on `make dev` (http://localhost:5173) as `customer@example.test` unless a step says otherwise. Read passwords from `.cache/secrets/shop.env`; do not paste them into notes or issues. The reservation lasts 15 minutes; to watch it expire sooner, add `SHOP_CHECKOUT_RESERVATIONTTL: 1m` (Spring drops the dash in `reservation-ttl`) to the `api` service environment in `deploy/compose/compose.yaml` and restart the stack (the expiry job runs every 30 s); revert the edit afterwards. There is no payment yet, so orders only end as Cancelled or Expired.
+
+- [ ] **Cart, checkout and orders by keyboard and screen reader**
+  - Why manual: axe does not judge focus order, announcements or wording.
+  - Steps: using only the keyboard, open a product, pick a quantity, add it to the cart, open the cart, change a quantity, remove a line, add again, check out, open the order from the list. Repeat with a screen reader.
+  - Expected: logical, visible focus on every step; the quantity select has a label; the cart count in the header, the `Not available in this quantity` marker, the totals, success and error messages are announced; the order page announces its status and `Reserved until` time; the orders list links make sense out of context (`View order <time>`).
+
+- [ ] **Reservation expiry observed in the UI**
+  - Why manual: it needs real time to pass and a person watching the screen.
+  - Steps: with the shortened hold above, place an order and keep the order page open. Note the stock of the product as an admin (Admin, edit page) before and after.
+  - Expected: when the time shown in `Reserved until` passes, the page changes to `Expired` and `Cancel order` disappears without a reload; within about 30 s the admin view shows `reserved` back to its earlier value; cancelling in another tab after expiry shows `This order can no longer be cancelled.`
+
+- [ ] **Cancel an order**
+  - Why manual: it checks what a person sees; e2e covers the API effects.
+  - Steps: place an order for two units of a product with little stock, then cancel it on the order page. Open the product as an admin.
+  - Expected: the status becomes `Cancelled`, the button disappears, the reserved quantity drops back, and the cart is empty. A second tab still showing the old order gets the cancel conflict message when it cancels again.
+
+- [ ] **Reservation-limit alert**
+  - Why manual: it needs several orders in a row and a read of the wording.
+  - Steps: place orders (cancel none) until the customer holds 10 units of one product in total, then try to check out one more unit of it. Then, with three orders awaiting payment, try a fourth.
+  - Expected: the first refusal says which product cannot be reserved until unpaid orders are paid or cancelled; the fourth order is refused with the pending-orders message; the alerts are announced and keep the cart intact. Cancel the orders afterwards.
+
 ## After the first push to GitHub
 
 - [ ] **Pull request workflow is green on a Linux runner**

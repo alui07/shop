@@ -104,6 +104,7 @@ describe('order detail', () => {
       'Reserved until Jan 1, 2999, 10:15:00 AM UTC',
     );
     expect(screen.getByText('Oak chair × 2')).toBeTruthy();
+    expect(screen.getByText('€50.00 each')).toBeTruthy();
     expect(screen.getByText('Total €100.00')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Cancel order' })).toBeTruthy();
   });

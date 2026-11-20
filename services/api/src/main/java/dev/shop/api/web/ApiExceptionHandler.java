@@ -1,6 +1,8 @@
 package dev.shop.api.web;
 
 import dev.shop.api.web.Problems.FieldProblem;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Objects;
@@ -8,6 +10,7 @@ import java.util.stream.Collectors;
 import org.apache.tomcat.util.http.InvalidParameterException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.TypeMismatchException;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -24,9 +27,12 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.RequestAttributes;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
+import org.springframework.web.servlet.HandlerMapping;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
+import org.springframework.web.util.UriUtils;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.exc.MismatchedInputException;
 
@@ -83,6 +89,24 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
                 .toList();
         return handleExceptionInternal(
                 exception, Problems.validation("The request is not valid", errors), headers, status, request);
+    }
+
+    /**
+     * Spring's default message quotes the rejected value; this one names only the parameter, and the instance is the
+     * route pattern, not the requested path.
+     */
+    @Override
+    protected ResponseEntity<Object> handleTypeMismatch(
+            TypeMismatchException exception, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
+        String parameter = exception.getPropertyName() == null ? "request" : exception.getPropertyName();
+        ProblemDetail problem = Problems.validation(
+                "The request is not valid", List.of(new FieldProblem(parameter, "has the wrong type")));
+        Object route =
+                request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, RequestAttributes.SCOPE_REQUEST);
+        if (route != null) {
+            problem.setInstance(URI.create(UriUtils.encodePath(route.toString(), StandardCharsets.UTF_8)));
+        }
+        return handleExceptionInternal(exception, problem, headers, status, request);
     }
 
     /**

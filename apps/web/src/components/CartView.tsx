@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
+import { useRef } from 'react';
 import { cartQuery, putCartLine, removeCartLine } from '@/api/cart';
 import type { ProblemError } from '@/api/problemError';
 import type { components } from '@/api/schema';
@@ -21,12 +22,12 @@ const QUANTITY_OPTIONS = Array.from({ length: MAX_QUANTITY }, (_, index) => ({
 
 function CartLineRow({
   line,
-  disabled,
+  busy,
   onQuantity,
   onRemove,
 }: {
   line: CartLine;
-  disabled: boolean;
+  busy: boolean;
   onQuantity: (quantity: number) => void;
   onRemove: () => void;
 }) {
@@ -44,10 +45,17 @@ function CartLineRow({
           label={`Quantity of ${line.name}`}
           value={String(line.quantity)}
           options={QUANTITY_OPTIONS}
+          busy={busy}
           onChange={(value) => onQuantity(Number(value))}
         />
         <p className="w-24 text-right font-medium">{formatPrice(line.lineTotal)}</p>
-        <Button variant="outline" size="sm" disabled={disabled} onClick={onRemove}>
+        <Button
+          variant="outline"
+          size="sm"
+          aria-disabled={busy}
+          className="aria-disabled:pointer-events-none aria-disabled:opacity-50"
+          onClick={onRemove}
+        >
           Remove
         </Button>
       </div>
@@ -60,6 +68,7 @@ export function CartView() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { data: cart, error, isPending } = useQuery(cartQuery);
+  const headingRef = useRef<HTMLHeadingElement>(null);
 
   const change = useMutation({
     mutationFn: ({ slug, quantity }: { slug: string; quantity: number | null }) =>
@@ -76,7 +85,9 @@ export function CartView() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Cart</h1>
+      <h1 ref={headingRef} tabIndex={-1} className="text-2xl font-semibold">
+        Cart
+      </h1>
       {isPending && <LoadingMessage text="Loading cart" />}
       {error && <p role="alert">The cart could not be loaded.</p>}
       {change.error && (
@@ -94,9 +105,17 @@ export function CartView() {
             <CartLineRow
               key={line.productSlug}
               line={line}
-              disabled={change.isPending}
-              onQuantity={(quantity) => change.mutate({ slug: line.productSlug, quantity })}
-              onRemove={() => change.mutate({ slug: line.productSlug, quantity: null })}
+              busy={change.isPending}
+              onQuantity={(quantity) => {
+                if (!change.isPending) change.mutate({ slug: line.productSlug, quantity });
+              }}
+              onRemove={() => {
+                if (!change.isPending)
+                  change.mutate(
+                    { slug: line.productSlug, quantity: null },
+                    { onSuccess: () => headingRef.current?.focus() },
+                  );
+              }}
             />
           ))}
         </ul>

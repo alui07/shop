@@ -6,6 +6,7 @@ import dev.shop.api.support.AuthIT;
 import dev.shop.api.support.Identity;
 import dev.shop.api.support.TestBrowser;
 import java.net.http.HttpResponse;
+import java.util.List;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
@@ -69,6 +70,34 @@ class AuthorizationMatrixIT extends AuthIT {
                 Arguments.of("POST", "/api/unknown", 401, 403, 403));
     }
 
+    /**
+     * The first five are answered with 400 by argument binding, which runs before the method guards, so their 403
+     * proves the URL rule itself; the method guards alone would also forbid the rest.
+     */
+    static Stream<Arguments> customerRoutes() {
+        return Stream.of(
+                Arguments.of("GET", "/api/orders?size=0"),
+                Arguments.of("GET", "/api/orders/not-a-uuid"),
+                Arguments.of("POST", "/api/orders/not-a-uuid/cancel"),
+                Arguments.of("POST", "/api/checkout"),
+                Arguments.of("PUT", "/api/cart/lines/desk-lamp"),
+                Arguments.of("GET", "/api/orders/" + UNKNOWN_ORDER),
+                Arguments.of("GET", "/api/orders"),
+                Arguments.of("GET", "/api/cart"),
+                Arguments.of("DELETE", "/api/cart/lines/desk-lamp"),
+                Arguments.of("POST", "/api/orders/" + UNKNOWN_ORDER + "/cancel"));
+    }
+
+    @ParameterizedTest(name = "{0} {1} as a signed-in user without the customer role")
+    @MethodSource("customerRoutes")
+    void aSignedInUserWithoutTheCustomerRoleIsForbiddenOnEveryCustomerRoute(String method, String path) {
+        TestBrowser roleless = signedInAs(Identity.customer().withRoles(List.of()));
+        TestBrowser otherRole = signedInAs(Identity.customer().withRoles(List.of("support")));
+
+        assertThat(statusFor(roleless, method, path, true)).as("no roles").isEqualTo(403);
+        assertThat(statusFor(otherRole, method, path, true)).as("another role").isEqualTo(403);
+    }
+
     @ParameterizedTest(name = "GET {0}")
     @MethodSource("safeRequests")
     void safeRequestsFollowTheRules(String path, int anonymous, int customer, int admin) {
@@ -97,7 +126,7 @@ class AuthorizationMatrixIT extends AuthIT {
     @ParameterizedTest(name = "{0} {1} without a CSRF token")
     @MethodSource("unsafeRequests")
     void unsafeRequestsWithoutACsrfTokenAreForbiddenForEveryone(String method, String path) throws Exception {
-        for (Supplier<TestBrowser> who : java.util.List.<Supplier<TestBrowser>>of(
+        for (Supplier<TestBrowser> who : List.<Supplier<TestBrowser>>of(
                 this::browser, () -> signedInAs(Identity.customer()), () -> signedInAs(Identity.admin()))) {
             TestBrowser browser = who.get();
             browser.get("/api/me");
