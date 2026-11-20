@@ -16,7 +16,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import dev.shop.api.catalog.Category;
-import dev.shop.api.catalog.Money;
+import dev.shop.api.catalog.pricing.Money;
 import dev.shop.api.customer.CurrentUser;
 import java.util.List;
 import java.util.stream.Stream;

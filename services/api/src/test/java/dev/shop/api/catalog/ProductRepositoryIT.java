@@ -3,6 +3,7 @@ package dev.shop.api.catalog;
 import static dev.shop.api.support.CatalogFixtures.ACTIVE_PRODUCTS;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import dev.shop.api.catalog.pricing.Money;
 import dev.shop.api.support.CatalogFixtures;
 import dev.shop.api.support.IntegrationTest;
 import java.util.List;

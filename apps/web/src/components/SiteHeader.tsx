@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { meQuery } from '@/api/session';
+import { CartLink } from './CartLink';
 import { SignInLink } from './SignInLink';
 import { UserMenu } from './UserMenu';
 
@@ -26,6 +27,7 @@ export function SiteHeader() {
           <Link to="/status" className={NAV_LINK_CLASS}>
             Status
           </Link>
+          {me?.roles.includes('customer') && <CartLink className={NAV_LINK_CLASS} />}
           {isPending ? null : me?.authenticated ? (
             <UserMenu me={me} />
           ) : (

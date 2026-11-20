@@ -2,6 +2,7 @@
   "realm": "shop",
   "users": [
     {
+      "id": "6f1d6c0a-0b0e-4f6e-9a55-1a2b3c4d5e01",
       "username": "customer@example.test",
       "email": "customer@example.test",
       "emailVerified": true,
@@ -13,6 +14,7 @@
       "realmRoles": ["customer"]
     },
     {
+      "id": "6f1d6c0a-0b0e-4f6e-9a55-1a2b3c4d5e02",
       "username": "admin@example.test",
       "email": "admin@example.test",
       "emailVerified": true,

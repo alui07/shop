@@ -5,10 +5,10 @@ import {
   VERSION_CONFLICT_TYPE,
   minorToPrice,
   priceToMinor,
-  type Problem,
   type ProductFormValues,
   type StockFormValues,
 } from '@/lib/adminSchemas';
+import type { Problem } from '@/lib/problem';
 
 type AdminProduct = components['schemas']['AdminProduct'];
 type ProductInput = components['schemas']['ProductInput'];

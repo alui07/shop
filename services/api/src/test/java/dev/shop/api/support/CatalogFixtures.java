@@ -9,7 +9,8 @@ public final class CatalogFixtures {
     private CatalogFixtures() {}
 
     public static void clear(JdbcClient jdbc) {
-        jdbc.sql("TRUNCATE stock, product, category RESTART IDENTITY CASCADE").update();
+        jdbc.sql("TRUNCATE stock, product, category, orders, cart, idempotency_key RESTART IDENTITY CASCADE")
+                .update();
     }
 
     public static void addCategory(JdbcClient jdbc, String slug, String name) {

@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  minorToPrice,
-  priceToMinor,
-  problemSchema,
-  productFormSchema,
-  stockFormSchema,
-} from './adminSchemas';
+import { minorToPrice, priceToMinor, productFormSchema, stockFormSchema } from './adminSchemas';
 
 const valid = {
   slug: 'oak-desk',
@@ -139,21 +133,5 @@ describe('price conversion', () => {
     [10_000_000, '100000.00'],
   ])('shows %d minor units as %s', (minor, price) => {
     expect(minorToPrice(minor)).toBe(price);
-  });
-});
-
-describe('problemSchema', () => {
-  it('defaults errors to an empty list', () => {
-    expect(problemSchema.parse({ type: 'x' })).toEqual({ type: 'x', errors: [] });
-  });
-
-  it('reads field errors', () => {
-    expect(
-      problemSchema.parse({ detail: 'd', errors: [{ field: 'slug', message: 'taken' }] }).errors,
-    ).toEqual([{ field: 'slug', message: 'taken' }]);
-  });
-
-  it('rejects malformed errors', () => {
-    expect(problemSchema.safeParse({ errors: [{ field: 1 }] }).success).toBe(false);
   });
 });

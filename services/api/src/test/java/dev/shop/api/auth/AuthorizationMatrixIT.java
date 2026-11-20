@@ -19,6 +19,7 @@ import tools.jackson.databind.json.JsonMapper;
 class AuthorizationMatrixIT extends AuthIT {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
+    private static final String UNKNOWN_ORDER = "7f0f2a4e-5c1b-4f55-9d0a-2b0a4f3c9e11";
 
     static Stream<Arguments> safeRequests() {
         return Stream.of(
@@ -34,6 +35,13 @@ class AuthorizationMatrixIT extends AuthIT {
                 Arguments.of("/api/admin/audit", 401, 403, 200),
                 Arguments.of("/api/admin/audit?size=0", 401, 403, 400),
                 Arguments.of("/api/admin/nothing", 401, 403, 404),
+                Arguments.of("/api/cart", 401, 200, 200),
+                Arguments.of("/api/cart/lines/desk-lamp", 401, 405, 405),
+                Arguments.of("/api/checkout", 401, 405, 405),
+                Arguments.of("/api/orders", 401, 200, 200),
+                Arguments.of("/api/orders?size=0", 401, 400, 400),
+                Arguments.of("/api/orders/" + UNKNOWN_ORDER, 401, 404, 404),
+                Arguments.of("/api/orders/not-a-uuid", 401, 400, 400),
                 Arguments.of("/api/unknown", 401, 403, 403),
                 Arguments.of("/actuator/health", 401, 403, 403),
                 Arguments.of("/v3/api-docs", 200, 200, 200),
@@ -50,6 +58,12 @@ class AuthorizationMatrixIT extends AuthIT {
                 Arguments.of("PUT", "/api/admin/products/1/stock", 401, 403, 400),
                 Arguments.of("DELETE", "/api/admin/products/1", 401, 403, 405),
                 Arguments.of("POST", "/api/admin/audit", 401, 403, 405),
+                Arguments.of("PUT", "/api/cart/lines/desk-lamp", 401, 400, 400),
+                Arguments.of("DELETE", "/api/cart/lines/desk-lamp", 401, 200, 200),
+                Arguments.of("POST", "/api/cart", 401, 405, 405),
+                Arguments.of("POST", "/api/checkout", 401, 400, 400),
+                Arguments.of("POST", "/api/orders", 401, 405, 405),
+                Arguments.of("POST", "/api/orders/" + UNKNOWN_ORDER + "/cancel", 401, 404, 404),
                 Arguments.of("PUT", "/api/products/x", 401, 403, 403),
                 Arguments.of("DELETE", "/api/me", 401, 403, 403),
                 Arguments.of("POST", "/api/unknown", 401, 403, 403));

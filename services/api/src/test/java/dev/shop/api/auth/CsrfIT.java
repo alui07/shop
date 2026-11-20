@@ -6,7 +6,11 @@ import dev.shop.api.support.AuthIT;
 import dev.shop.api.support.Identity;
 import dev.shop.api.support.TestBrowser;
 import java.net.http.HttpResponse;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 class CsrfIT extends AuthIT {
 
@@ -45,6 +49,38 @@ class CsrfIT extends AuthIT {
 
         assertThat(setCookies(firstAfterLogout)).anyMatch(header -> header.startsWith("__Host-XSRF-TOKEN="));
         assertThat(browser.cookie(TestBrowser.CSRF_COOKIE)).isNotNull().isNotEqualTo(tokenBeforeLogout);
+    }
+
+    static Stream<Arguments> customerUnsafeRoutes() {
+        return Stream.of(
+                Arguments.of("PUT", "/api/cart/lines/desk-lamp"),
+                Arguments.of("DELETE", "/api/cart/lines/desk-lamp"),
+                Arguments.of("POST", "/api/checkout"),
+                Arguments.of("POST", "/api/orders/7f0f2a4e-5c1b-4f55-9d0a-2b0a4f3c9e11/cancel"));
+    }
+
+    @ParameterizedTest(name = "{0} {1} needs the CSRF token")
+    @MethodSource("customerUnsafeRoutes")
+    void everyCustomerWriteRefusesARequestWithoutTheToken(String method, String path) {
+        TestBrowser browser = signedInAs(Identity.customer());
+        browser.get("/api/me");
+
+        HttpResponse<String> response = browser.send(method, path, null);
+
+        assertThat(response.statusCode()).isEqualTo(403);
+        assertThat(response.body()).contains("CSRF token missing or invalid");
+    }
+
+    @ParameterizedTest(name = "{0} {1} passes the CSRF check with the token")
+    @MethodSource("customerUnsafeRoutes")
+    void everyCustomerWriteGetsPastTheCsrfCheckWithTheToken(String method, String path) {
+        TestBrowser browser = signedInAs(Identity.customer());
+        browser.get("/api/me");
+
+        HttpResponse<String> response =
+                browser.send(method, path, null, "X-XSRF-TOKEN", browser.cookie(TestBrowser.CSRF_COOKIE));
+
+        assertThat(response.statusCode()).isNotEqualTo(403);
     }
 
     private static java.util.List<String> setCookies(HttpResponse<?> response) {

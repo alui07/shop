@@ -11,12 +11,8 @@ import {
   toStockInput,
   toSubmitErrors,
 } from './adminForms';
-import {
-  DUPLICATE_SLUG_TYPE,
-  VALIDATION_TYPE,
-  VERSION_CONFLICT_TYPE,
-  type Problem,
-} from './adminSchemas';
+import { DUPLICATE_SLUG_TYPE, VALIDATION_TYPE, VERSION_CONFLICT_TYPE } from './adminSchemas';
+import type { Problem } from './problem';
 
 const product = adminProduct(7, 'Oak chair');
 

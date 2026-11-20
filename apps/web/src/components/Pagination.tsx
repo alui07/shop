@@ -4,7 +4,7 @@ import { pageWindow } from '@/lib/pageWindow';
 const ITEM_CLASS =
   'inline-flex h-9 min-w-9 items-center justify-center rounded-md border px-3 text-sm';
 
-type PagedRoute = '/' | '/admin' | '/admin/audit';
+type PagedRoute = '/' | '/admin' | '/admin/audit' | '/orders';
 
 function PageLink({
   to,
