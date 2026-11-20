@@ -176,7 +176,7 @@ Some things cannot be automated: first-time Docker group setup, checking the fir
 - In kind, Valkey's image version is pinned only in `deploy/versions.mk`, and a secrets hash annotation restarts `api` and `keycloak` when `.cache/secrets/shop.env` changes.
 - The client IP from `X-Forwarded-For` is not trustworthy yet and nothing uses it; fix it before slice 5 (`docs/threat-model.md`, R20).
 - Keycloak's image scan fails only on fixable CRITICAL findings; HIGH is reported (gated in slice 6).
-- Until 2026-12-02 `scan-web` ignores 5 HIGH nginx 1.30.6 CVEs (HTTP/2, HTTP/3, mail, proxy with SSI or mirror; none reachable with `apps/web/nginx.conf`) in `apps/web/.trivyignore.yaml`, pending the nginx-unprivileged 1.30.7 image.
+- Until 2026-12-02 `scan-web` ignores 6 HIGH nginx 1.30.6 CVEs (HTTP/2, HTTP/3, TLS, mail, proxy with SSI or mirror; none reachable with `apps/web/nginx.conf`) in `apps/web/.trivyignore.yaml`, pending the nginx-unprivileged 1.30.7 image.
 - Playwright traces from failed e2e runs record typed test passwords (`tests/README.md`).
 - Admin writes: the slug cannot change after create; a product is hidden by clearing `Active`, never deleted. Admins set `onHand`; `reserved` belongs to checkout (slice 4). There is no audit filter or export and no rate limit on writes until slice 5. The audit log is append-only by database triggers, but the database owner role can disable them (`docs/threat-model.md`, R21).
 - A demoted admin can still write for up to 5 minutes while Keycloak is up. With Keycloak down, admin writes get 503 once the last success is older than 5 minutes, while reads continue to the 15-minute grace.

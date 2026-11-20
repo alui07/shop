@@ -185,9 +185,14 @@ api-spec: cache-dirs ## Rewrite services/api/openapi/openapi.json from the runni
 	$(MVN_DOCKER) $(MVN_IT_DOCKER) -e UPDATE_OPENAPI=true $(MAVEN_IMAGE) $(MVN_ARGS) \
 		-Dit.test=OpenApiContractIT -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true verify
 
+# The jar is built with the cached Maven repository, not inside docker build, so the image build never downloads from Maven Central.
 # Attestations make the image ID an index digest that changes on every build with the containerd store, which would roll pods on every deploy.
-api-build:
-	docker build --build-arg MAVEN_IMAGE=$(MAVEN_IMAGE) --build-arg JRE_IMAGE=$(JRE_IMAGE) --provenance=false --sbom=false -t $(API_IMAGE) services/api
+api-build: cache-dirs
+	rm -f services/api/target/api-*.jar services/api/target/api-*.jar.original
+	$(MVN_DOCKER) $(MAVEN_IMAGE) $(MVN_ARGS) -DskipTests package
+	docker run --rm $(AS_HOST) -v $(CURDIR)/services/api:/workspace -w /workspace --entrypoint sh $(MAVEN_IMAGE) \
+		-c 'rm -rf target/extracted && java -Djarmode=tools -jar target/api-*.jar extract --layers --launcher --destination target/extracted'
+	docker build --build-arg JRE_IMAGE=$(JRE_IMAGE) --provenance=false --sbom=false -t $(API_IMAGE) services/api
 
 web-tools:
 	docker build --target dev --build-arg NODE_IMAGE=$(NODE_IMAGE) --build-arg NGINX_IMAGE=$(NGINX_IMAGE) \

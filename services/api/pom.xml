@@ -23,6 +23,8 @@
         <argLine/>
         <spring-modulith.version>2.1.2</spring-modulith.version>
         <springdoc.version>3.2.0</springdoc.version>
+        <!-- Fixed so repeated builds give byte-identical jars and an unchanged image ID (build-info time included). -->
+        <project.build.outputTimestamp>2026-01-01T00:00:00Z</project.build.outputTimestamp>
     </properties>
 
     <dependencyManagement>
