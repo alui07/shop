@@ -116,7 +116,9 @@ class CheckoutService {
                 row.createdAt(),
                 row.expiresAt(),
                 orders.lines(row.id()),
-                row.total());
+                row.total(),
+                row.paymentStatus(),
+                row.latePayment());
     }
 
     private void refuseWhenCustomerHoldsTooMuch(String subject, CartSnapshot cart, Instant now) {
@@ -195,7 +197,7 @@ class CheckoutService {
                     line.quantity(),
                     Money.euros(product.price().amountMinor() * line.quantity())));
         }
-        return new Order(orderId, OrderStatus.PENDING_PAYMENT, now, expiresAt, lines, orderTotal);
+        return new Order(orderId, OrderStatus.PENDING_PAYMENT, now, expiresAt, lines, orderTotal, null, false);
     }
 
     private List<String> slugsOf(Collection<Long> productIds) {

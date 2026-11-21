@@ -61,7 +61,9 @@ class ReservationExpiryIT extends ShopIT {
         CompletableFuture<Integer> first = CompletableFuture.supplyAsync(job::runOnce);
         CompletableFuture<Integer> second = CompletableFuture.supplyAsync(other::runOnce);
 
-        assertThat(first.get() + second.get()).isEqualTo(250);
+        int raced = first.get() + second.get();
+        int nextRun = job.runOnce(); // rows the other job held locked are skipped and wait for the next run
+        assertThat(raced + nextRun).isEqualTo(250);
         assertThat(jdbc.sql("SELECT count(*) FROM orders WHERE status = 'EXPIRED'")
                         .query(Integer.class)
                         .single())
@@ -109,6 +111,7 @@ class ReservationExpiryIT extends ShopIT {
     }
 
     private static CheckoutProperties properties(int expiryBatchSize) {
-        return new CheckoutProperties(Duration.ofMinutes(15), 3, 10, Duration.ofHours(24), expiryBatchSize, 1000);
+        return new CheckoutProperties(
+                Duration.ofMinutes(15), 3, 10, Duration.ofHours(24), expiryBatchSize, 1000, Duration.ofMinutes(30));
     }
 }

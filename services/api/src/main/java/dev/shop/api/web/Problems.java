@@ -21,6 +21,9 @@ public final class Problems {
     public static final String IDEMPOTENCY_IN_PROGRESS = "tag:shop.dev,2026:idempotency-in-progress";
     public static final String IDEMPOTENCY_KEY_REUSED = "tag:shop.dev,2026:idempotency-key-reused";
     public static final String BODY_TOO_LARGE = "tag:shop.dev,2026:body-too-large";
+    public static final String PAYMENT_STATE = "tag:shop.dev,2026:payment-state";
+    public static final String PAYMENT_NOT_FOUND = "tag:shop.dev,2026:payment-not-found";
+    public static final String WEBHOOK_SIGNATURE = "tag:shop.dev,2026:webhook-signature";
     public static final String UNSUPPORTED_MEDIA_TYPE = "tag:shop.dev,2026:unsupported-media-type";
 
     private Problems() {}

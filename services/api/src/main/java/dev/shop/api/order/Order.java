@@ -16,4 +16,10 @@ record Order(
         Instant expiresAt,
 
         List<OrderLine> lines,
-        Money total) {}
+        Money total,
+
+        @Schema(description = "The status of the latest payment; null before a payment was started", nullable = true)
+        OrderPaymentStatus paymentStatus,
+
+        @Schema(description = "True when the payment arrived after the hold had run out and the stock was still taken")
+        boolean latePayment) {}

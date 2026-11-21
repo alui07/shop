@@ -138,6 +138,7 @@ class StockRaceIT extends ShopIT {
         List<String> customers = seedCartsWithBothProducts(10);
 
         Outcomes outcomes = race(checkoutAsEach(customers), first::runOnce, second::runOnce);
+        first.runOnce(); // rows the other job held locked are skipped and wait for the next run
 
         assertThat(outcomes.succeeded + outcomes.outOfStock).isEqualTo(10);
         assertThat(jdbc.sql(
@@ -150,7 +151,8 @@ class StockRaceIT extends ShopIT {
     }
 
     private static CheckoutProperties smallBatches() {
-        return new CheckoutProperties(Duration.ofMinutes(15), 3, 10, Duration.ofHours(24), 5, 1000);
+        return new CheckoutProperties(
+                Duration.ofMinutes(15), 3, 10, Duration.ofHours(24), 5, 1000, Duration.ofMinutes(30));
     }
 
     private List<String> seedCarts(int customers, long productId, int quantity) {

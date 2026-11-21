@@ -6,6 +6,8 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -57,6 +59,34 @@ public class StockReservations {
     public void releaseAll(Collection<UUID> orderIds) {
         repository.activeQuantityByProduct(orderIds).forEach(repository::giveBack);
         repository.markReleased(orderIds);
+    }
+
+    /** The order was paid inside its hold: the held units leave the shelf for good. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void consume(UUID orderId) {
+        repository.activeQuantityByProduct(List.of(orderId)).forEach(repository::consumeStock);
+        repository.markConsumed(orderId);
+    }
+
+    /**
+     * The order was paid after its hold was given back: takes the units now if every line is still free, else takes
+     * nothing and returns false. The reservation rows only record what was taken; they are not active holds.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean takeLate(UUID orderId, Collection<ReservationLine> lines) {
+        Map<Long, Integer> wanted = new TreeMap<>();
+        lines.forEach(line -> wanted.merge(line.productId(), line.quantity(), Integer::sum));
+        Map<Long, Integer> free = repository.lockFreeStock(wanted.keySet());
+        boolean everyLineFree =
+                wanted.entrySet().stream().allMatch(line -> free.getOrDefault(line.getKey(), 0) >= line.getValue());
+        if (everyLineFree) {
+            OffsetDateTime now = OffsetDateTime.now(clock);
+            wanted.forEach((productId, quantity) -> {
+                repository.takeStock(productId, quantity);
+                repository.insertConsumed(orderId, productId, quantity, now);
+            });
+        }
+        return everyLineFree;
     }
 
     private List<Long> shortProducts(ReservationLine failed, List<ReservationLine> later) {

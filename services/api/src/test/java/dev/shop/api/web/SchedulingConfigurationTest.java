@@ -6,10 +6,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor;
 
-class AsyncAndSchedulingConfigurationTest {
+class SchedulingConfigurationTest {
 
     private final ApplicationContextRunner runner =
-            new ApplicationContextRunner().withUserConfiguration(AsyncAndSchedulingConfiguration.class);
+            new ApplicationContextRunner().withUserConfiguration(SchedulingConfiguration.class);
 
     @Test
     void schedulingIsOnByDefault() {

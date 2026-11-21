@@ -83,6 +83,16 @@ services:
     depends_on:
       keycloak-db:
         condition: service_healthy
+      mailpit:
+        condition: service_healthy
+
+  mailpit:
+    image: ${MAILPIT_IMAGE:?set by make}
+    healthcheck:
+      test: ['CMD', '/mailpit', 'readyz']
+      interval: 2s
+      timeout: 3s
+      retries: 30
 
   api:
     image: ${API_IMAGE:?set by make}
@@ -99,10 +109,16 @@ services:
       SHOP_AUTH_INTERNAL_REALM_URL: http://keycloak:8080/realms/shop
       SHOP_AUTH_CLIENT_ID: shop-api
       SHOP_AUTH_CLIENT_SECRET: ${SHOP_AUTH_CLIENT_SECRET:?run make secrets}
+      SHOP_PAYMENT_PROVIDER: fake
+      SHOP_PAYMENT_WEBHOOK_SECRET: ${SHOP_PAYMENT_WEBHOOK_SECRET:?run make secrets}
+      SPRING_MAIL_HOST: mailpit
+      SPRING_MAIL_PORT: '1025'
     depends_on:
       postgres:
         condition: service_healthy
       valkey:
+        condition: service_healthy
+      mailpit:
         condition: service_healthy
     healthcheck:
       test:
@@ -154,6 +170,7 @@ services:
       E2E_ACCESS_TOKEN_LIFESPAN: ${SHOP_ACCESS_TOKEN_LIFESPAN:-10}
       SHOP_TEST_CUSTOMER_PASSWORD: ${SHOP_TEST_CUSTOMER_PASSWORD:?run make secrets}
       SHOP_TEST_ADMIN_PASSWORD: ${SHOP_TEST_ADMIN_PASSWORD:?run make secrets}
+      E2E_MAILPIT_URL: http://mailpit:8025
       E2E_REPORT_DIR: /reports
     volumes:
       - .:/e2e:ro

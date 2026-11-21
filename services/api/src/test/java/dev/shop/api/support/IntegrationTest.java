@@ -11,6 +11,11 @@ import org.springframework.boot.test.context.SpringBootTest;
 @Retention(RetentionPolicy.RUNTIME)
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = {"management.server.port=0", "springdoc.api-docs.enabled=true", "shop.jobs.enabled=false"})
+        properties = {
+            "management.server.port=0",
+            "springdoc.api-docs.enabled=true",
+            "shop.jobs.enabled=false",
+            "shop.payment.provider=fake"
+        })
 @TestInfrastructure
 public @interface IntegrationTest {}

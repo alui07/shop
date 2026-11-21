@@ -104,6 +104,27 @@ class BodyLimitIT extends ShopIT {
     }
 
     @Test
+    void theWebhookExemptionIsExactlyPostToTheExactPath() {
+        String large = padded("{}", 20 * 1024);
+
+        HttpResponse<String> exact =
+                sendRaw("POST", "/api/payments/webhook", large, false, "application/json", Map.of());
+        HttpResponse<String> otherMethod =
+                sendRaw("PUT", "/api/payments/webhook", large, false, "application/json", Map.of());
+        HttpResponse<String> trailingSlash =
+                sendRaw("POST", "/api/payments/webhook/", large, false, "application/json", Map.of());
+        HttpResponse<String> encoded =
+                sendRaw("POST", "/api/payments/%77ebhook", large, false, "application/json", Map.of());
+
+        assertThat(exact.statusCode())
+                .as("the webhook enforces its own, larger limit")
+                .isEqualTo(401);
+        assertTooLarge(otherMethod);
+        assertTooLarge(trailingSlash);
+        assertTooLarge(encoded);
+    }
+
+    @Test
     void aSmallBodyStillWorksAfterAnOversizedOne() {
         TestBrowser browser = signedInAs(Identity.customer().withSubject("limit-recover"));
         browser.get("/api/me");

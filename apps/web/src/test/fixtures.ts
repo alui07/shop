@@ -133,6 +133,8 @@ export function orderOf(overrides: Partial<Order> = {}): Order {
     expiresAt: '2999-01-01T10:15:00Z',
     lines: [cartLine('oak-chair', 'Oak chair', 2)],
     total: { amountMinor: 10000, currency: 'EUR' },
+    paymentStatus: null,
+    latePayment: false,
     ...overrides,
   };
 }

@@ -241,6 +241,47 @@
         "required" : [ "cartVersion", "expectedTotalMinor" ],
         "type" : "object"
       },
+      "FakePspCompletion" : {
+        "properties" : {
+          "outcome" : {
+            "enum" : [ "SUCCEEDED", "DECLINED" ],
+            "type" : "string"
+          }
+        },
+        "required" : [ "outcome" ],
+        "type" : "object"
+      },
+      "FakePspPayment" : {
+        "description" : "A payment on the fake provider's page",
+        "properties" : {
+          "amountMinor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "expiresAt" : {
+            "description" : "After this the page can no longer be completed",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "merchantReference" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "returnUrl" : {
+            "description" : "Relative URL of the order to return to, /orders/{id}",
+            "type" : "string"
+          },
+          "status" : {
+            "enum" : [ "PENDING", "SUCCEEDED", "DECLINED", "REFUNDED" ],
+            "type" : "string"
+          }
+        },
+        "required" : [ "amountMinor", "currency", "expiresAt", "merchantReference", "returnUrl", "status" ],
+        "type" : "object"
+      },
       "FieldChange" : {
         "properties" : {
           "field" : {
@@ -310,21 +351,30 @@
             "format" : "uuid",
             "type" : "string"
           },
+          "latePayment" : {
+            "description" : "True when the payment arrived after the hold had run out and the stock was still taken",
+            "type" : "boolean"
+          },
           "lines" : {
             "items" : {
               "$ref" : "#/components/schemas/OrderLine"
             },
             "type" : "array"
           },
+          "paymentStatus" : {
+            "description" : "The status of the latest payment; null before a payment was started",
+            "enum" : [ "CREATED", "SUCCEEDED", "FAILED", "REFUND_PENDING", "REFUNDED" ],
+            "type" : [ "string", "null" ]
+          },
           "status" : {
-            "enum" : [ "PENDING_PAYMENT", "CANCELLED", "EXPIRED" ],
+            "enum" : [ "PENDING_PAYMENT", "CANCELLED", "EXPIRED", "PAID", "REFUND_PENDING", "REFUNDED" ],
             "type" : "string"
           },
           "total" : {
             "$ref" : "#/components/schemas/Money"
           }
         },
-        "required" : [ "createdAt", "expiresAt", "id", "lines", "status", "total" ],
+        "required" : [ "createdAt", "expiresAt", "id", "latePayment", "lines", "paymentStatus", "status", "total" ],
         "type" : "object"
       },
       "OrderLine" : {
@@ -396,7 +446,7 @@
             "type" : "integer"
           },
           "status" : {
-            "enum" : [ "PENDING_PAYMENT", "CANCELLED", "EXPIRED" ],
+            "enum" : [ "PENDING_PAYMENT", "CANCELLED", "EXPIRED", "PAID", "REFUND_PENDING", "REFUNDED" ],
             "type" : "string"
           },
           "total" : {
@@ -404,6 +454,18 @@
           }
         },
         "required" : [ "createdAt", "expiresAt", "id", "itemCount", "status", "total" ],
+        "type" : "object"
+      },
+      "PaymentStart" : {
+        "description" : "Where to send the customer to pay",
+        "properties" : {
+          "redirectUrl" : {
+            "description" : "Relative URL of the provider's payment page, /fake-psp/{token}",
+            "example" : "/fake-psp/abc",
+            "type" : "string"
+          }
+        },
+        "required" : [ "redirectUrl" ],
         "type" : "object"
       },
       "ProblemDetail" : {
@@ -604,6 +666,67 @@
           }
         },
         "required" : [ "onHand", "version" ],
+        "type" : "object"
+      },
+      "WebhookAck" : {
+        "properties" : {
+          "received" : {
+            "type" : "boolean"
+          }
+        },
+        "required" : [ "received" ],
+        "type" : "object"
+      },
+      "WebhookEvent" : {
+        "description" : "A provider event, signed with HMAC-SHA256 in the Shop-Signature header",
+        "properties" : {
+          "created" : {
+            "description" : "Unix seconds; informational, the signature timestamp is authoritative",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "data" : {
+            "$ref" : "#/components/schemas/WebhookEventData"
+          },
+          "id" : {
+            "description" : "Unique per event; a repeated id has no further effect",
+            "example" : "evt_0b1c2d3e",
+            "maxLength" : 100,
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "type" : {
+            "enum" : [ "payment.succeeded", "payment.failed" ],
+            "type" : "string"
+          }
+        },
+        "required" : [ "created", "data", "id", "type" ],
+        "type" : "object"
+      },
+      "WebhookEventData" : {
+        "properties" : {
+          "amountMinor" : {
+            "format" : "int64",
+            "minimum" : 0,
+            "type" : "integer"
+          },
+          "currency" : {
+            "pattern" : "[A-Z]{3}",
+            "type" : "string"
+          },
+          "merchantReference" : {
+            "description" : "The payment id the shop gave the provider when creating it",
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "providerPaymentId" : {
+            "description" : "The provider's id for the payment",
+            "maxLength" : 100,
+            "minLength" : 1,
+            "type" : "string"
+          }
+        },
+        "required" : [ "amountMinor", "currency", "merchantReference", "providerPaymentId" ],
         "type" : "object"
       }
     },
@@ -1732,6 +1855,205 @@
         "tags" : [ "checkout-controller" ]
       }
     },
+    "/api/fake-psp/payments/{token}" : {
+      "get" : {
+        "operationId" : "read",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "token",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/FakePspPayment"
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Bad Request"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "No payment has this token (payment-not-found)"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          },
+          "503" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Service Unavailable"
+          }
+        },
+        "security" : [ {
+          "sessionCookie" : [ ]
+        } ],
+        "tags" : [ "fake-psp-controller" ]
+      }
+    },
+    "/api/fake-psp/payments/{token}/complete" : {
+      "post" : {
+        "operationId" : "complete",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "token",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/FakePspCompletion"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/FakePspPayment"
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Bad Request"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "No payment has this token (payment-not-found)"
+          },
+          "409" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Already completed, or the session has expired (payment-state)"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          },
+          "503" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Service Unavailable"
+          }
+        },
+        "security" : [ {
+          "csrfHeader" : [ ],
+          "sessionCookie" : [ ]
+        } ],
+        "tags" : [ "fake-psp-controller" ]
+      }
+    },
     "/api/me" : {
       "get" : {
         "operationId" : "me",
@@ -2083,6 +2405,223 @@
           "sessionCookie" : [ ]
         } ],
         "tags" : [ "order-controller" ]
+      }
+    },
+    "/api/orders/{id}/payment" : {
+      "post" : {
+        "operationId" : "startPayment",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PaymentStart"
+                }
+              }
+            },
+            "description" : "OK. An open payment session is returned again rather than a second one created"
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Bad Request"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Found, also for another customer's order"
+          },
+          "409" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Conflict: the order is not awaiting payment, or its hold has run out (order-state)"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          },
+          "503" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Service Unavailable"
+          }
+        },
+        "security" : [ {
+          "csrfHeader" : [ ],
+          "sessionCookie" : [ ]
+        } ],
+        "tags" : [ "payment-controller" ]
+      }
+    },
+    "/api/payments/webhook" : {
+      "post" : {
+        "description" : "Authenticated by the HMAC signature only: no session, no CSRF token.",
+        "operationId" : "receive",
+        "parameters" : [ {
+          "description" : "t=<unix seconds>,v1=<64 lowercase hex>; v1 = HMAC-SHA256(secret, t + \".\" + body)",
+          "in" : "header",
+          "name" : "Shop-Signature",
+          "required" : true
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/WebhookEvent"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/WebhookAck"
+                }
+              }
+            },
+            "description" : "OK, also for an event id seen before"
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Malformed JSON or an unknown event type, after the signature was verified"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Signature missing, malformed, stale or wrong (webhook-signature)"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "No payment matches the event; the provider is expected to retry (payment-not-found)"
+          },
+          "413" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Body over 64 KiB (body-too-large)"
+          },
+          "415" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Content-Type is not application/json (unsupported-media-type)"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          },
+          "503" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Service Unavailable"
+          }
+        },
+        "summary" : "Receive a payment provider event",
+        "tags" : [ "webhook-controller" ]
       }
     },
     "/api/products" : {

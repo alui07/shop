@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.InvalidMediaTypeException;
 import org.springframework.http.MediaType;
@@ -22,7 +23,8 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * Caps customer request bodies. A declared length over the limit is refused before anything is read; a body with no
  * declared length (chunked) is counted as it is read and fails at one byte over. A body that is not JSON is refused
- * with 415 before it is read. Admin bodies keep their own bounds.
+ * with 415 before it is read. Admin bodies keep their own bounds, and the payment webhook, which enforces its own
+ * larger limit, is skipped by exact method and path: any other spelling of the path stays under this cap.
  */
 final class RequestBodyLimitFilter extends OncePerRequestFilter {
 
@@ -30,6 +32,7 @@ final class RequestBodyLimitFilter extends OncePerRequestFilter {
 
     private static final String API_PREFIX = "/api/";
     private static final String ADMIN_PREFIX = "/api/admin/";
+    private static final String WEBHOOK_PATH = "/api/payments/webhook";
 
     private final JsonMapper jsonMapper;
 
@@ -40,7 +43,9 @@ final class RequestBodyLimitFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI();
-        return !path.startsWith(API_PREFIX) || path.startsWith(ADMIN_PREFIX);
+        return !path.startsWith(API_PREFIX)
+                || path.startsWith(ADMIN_PREFIX)
+                || (HttpMethod.POST.matches(request.getMethod()) && WEBHOOK_PATH.equals(path));
     }
 
     @Override

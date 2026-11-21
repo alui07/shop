@@ -4,6 +4,8 @@ namespace: shop
 resources:
   - ../../base
   - envoy-proxy.yaml
+  - mailpit.yaml
+  - network-policies-mail.yaml
 configMapGenerator:
   # The hash suffix changes with the content, so an edited users file rolls the Keycloak pod.
   - name: keycloak-users
@@ -20,6 +22,19 @@ images:
     newName: shop/web
     newTag: dev
 patches:
+  - target:
+      kind: Gateway
+      name: shop
+    patch: |-
+      - op: add
+        path: /spec/listeners/-
+        value:
+          name: mail
+          protocol: HTTP
+          port: 8025
+          allowedRoutes:
+            namespaces:
+              from: Same
   - target:
       kind: Gateway
       name: shop
@@ -49,11 +64,18 @@ patches:
               shop.dev/image-id: api-image-id-placeholder
               shop.dev/shop-auth-hash: shop-auth-hash-placeholder
               shop.dev/valkey-auth-hash: valkey-auth-hash-placeholder
+              shop.dev/shop-payment-hash: shop-payment-hash-placeholder
           spec:
             containers:
               - name: api
                 imagePullPolicy: Never
                 env:
+                  - name: SHOP_PAYMENT_PROVIDER
+                    value: fake
+                  - name: SPRING_MAIL_HOST
+                    value: mailpit
+                  - name: SPRING_MAIL_PORT
+                    value: '1025'
                   - name: SPRING_PROFILES_ACTIVE
                     value: seed
                   - name: SHOP_PUBLIC_ORIGIN

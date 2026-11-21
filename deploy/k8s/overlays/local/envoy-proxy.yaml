@@ -30,6 +30,9 @@ spec:
                   nodePort: 30080
                 - port: 8089
                   nodePort: 30089
+                - port: 8025
+                  name: mail-ui
+                  nodePort: 30025
       envoyDeployment:
         replicas: 1
         container:

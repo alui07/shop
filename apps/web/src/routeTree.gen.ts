@@ -16,6 +16,7 @@ import { Route as CheckoutRouteImport } from './routes/checkout'
 import { Route as StatusRouteImport } from './routes/status'
 import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as AdminAuditRouteImport } from './routes/admin.audit'
+import { Route as FakePspTokenRouteImport } from './routes/fake-psp.$token'
 import { Route as OrdersIndexRouteImport } from './routes/orders.index'
 import { Route as OrdersIdRouteImport } from './routes/orders.$id'
 import { Route as ProductsSlugRouteImport } from './routes/products.$slug'
@@ -57,6 +58,11 @@ const AdminAuditRoute = AdminAuditRouteImport.update({
   path: '/audit',
   getParentRoute: () => AdminRoute,
 } as any)
+const FakePspTokenRoute = FakePspTokenRouteImport.update({
+  id: '/fake-psp/$token',
+  path: '/fake-psp/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const OrdersIndexRoute = OrdersIndexRouteImport.update({
   id: '/orders/',
   path: '/orders/',
@@ -90,6 +96,7 @@ export interface FileRoutesByFullPath {
   '/checkout': typeof CheckoutRoute
   '/status': typeof StatusRoute
   '/admin/audit': typeof AdminAuditRoute
+  '/fake-psp/$token': typeof FakePspTokenRoute
   '/orders/$id': typeof OrdersIdRoute
   '/products/$slug': typeof ProductsSlugRoute
   '/admin/': typeof AdminIndexRoute
@@ -103,6 +110,7 @@ export interface FileRoutesByTo {
   '/checkout': typeof CheckoutRoute
   '/status': typeof StatusRoute
   '/admin/audit': typeof AdminAuditRoute
+  '/fake-psp/$token': typeof FakePspTokenRoute
   '/orders/$id': typeof OrdersIdRoute
   '/products/$slug': typeof ProductsSlugRoute
   '/admin': typeof AdminIndexRoute
@@ -118,6 +126,7 @@ export interface FileRoutesById {
   '/checkout': typeof CheckoutRoute
   '/status': typeof StatusRoute
   '/admin/audit': typeof AdminAuditRoute
+  '/fake-psp/$token': typeof FakePspTokenRoute
   '/orders/$id': typeof OrdersIdRoute
   '/products/$slug': typeof ProductsSlugRoute
   '/admin/': typeof AdminIndexRoute
@@ -134,6 +143,7 @@ export interface FileRouteTypes {
     | '/checkout'
     | '/status'
     | '/admin/audit'
+    | '/fake-psp/$token'
     | '/orders/$id'
     | '/products/$slug'
     | '/admin/'
@@ -147,6 +157,7 @@ export interface FileRouteTypes {
     | '/checkout'
     | '/status'
     | '/admin/audit'
+    | '/fake-psp/$token'
     | '/orders/$id'
     | '/products/$slug'
     | '/admin'
@@ -161,6 +172,7 @@ export interface FileRouteTypes {
     | '/checkout'
     | '/status'
     | '/admin/audit'
+    | '/fake-psp/$token'
     | '/orders/$id'
     | '/products/$slug'
     | '/admin/'
@@ -175,6 +187,7 @@ export interface RootRouteChildren {
   CartRoute: typeof CartRoute
   CheckoutRoute: typeof CheckoutRoute
   StatusRoute: typeof StatusRoute
+  FakePspTokenRoute: typeof FakePspTokenRoute
   OrdersIdRoute: typeof OrdersIdRoute
   ProductsSlugRoute: typeof ProductsSlugRoute
   OrdersIndexRoute: typeof OrdersIndexRoute
@@ -230,6 +243,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/admin/audit'
       preLoaderRoute: typeof AdminAuditRouteImport
       parentRoute: typeof AdminRoute
+    }
+    '/fake-psp/$token': {
+      id: '/fake-psp/$token'
+      path: '/fake-psp/$token'
+      fullPath: '/fake-psp/$token'
+      preLoaderRoute: typeof FakePspTokenRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/orders/': {
       id: '/orders/'
@@ -291,6 +311,7 @@ const rootRouteChildren: RootRouteChildren = {
   CartRoute: CartRoute,
   CheckoutRoute: CheckoutRoute,
   StatusRoute: StatusRoute,
+  FakePspTokenRoute: FakePspTokenRoute,
   OrdersIdRoute: OrdersIdRoute,
   ProductsSlugRoute: ProductsSlugRoute,
   OrdersIndexRoute: OrdersIndexRoute,

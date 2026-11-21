@@ -2,6 +2,8 @@ ARG JRE_IMAGE
 
 # Expects target/extracted from make api-build, which packages the jar with the cached Maven repository.
 FROM ${JRE_IMAGE}
+# hadolint ignore=DL3017
+RUN apk upgrade --no-cache
 WORKDIR /app
 COPY target/extracted/dependencies/ ./
 COPY target/extracted/spring-boot-loader/ ./

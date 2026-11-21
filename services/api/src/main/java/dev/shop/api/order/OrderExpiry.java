@@ -33,7 +33,8 @@ class OrderExpiry {
         orders.updateStatus(
                 ids,
                 OrderStateMachine.next(OrderStatus.PENDING_PAYMENT, OrderTrigger.EXPIRE)
-                        .orElseThrow());
+                        .orElseThrow()
+                        .next());
         return ids.size();
     }
 }

@@ -1,6 +1,6 @@
 # Threat model
 
-Status: slice 3a matches the implemented code and its tests (API 100% line and branch, compose and cluster e2e). The admin section (slice 3b) was checked against the code (API 128 unit and 272 integration tests, web 294, e2e 85). The checkout section (slice 4a) was checked against the implemented code and its tests (API 154 unit and 456 integration tests, web 391); the webhook section arrives in slice 4b. Design rationale is in ADR 0006 (authentication) and ADR 0007 (admin writes).
+Status: slice 3a matches the implemented code and its tests (API 100% line and branch, compose and cluster e2e). The admin section (slice 3b) was checked against the code (API 128 unit and 272 integration tests, web 294, e2e 85). The checkout section (slice 4a) was checked against the implemented code and its tests (API 154 unit and 456 integration tests, web 391); the payment and webhook section (slice 4b) was checked against the implemented code and its tests (API tests 100% line and branch, web 451, e2e 100 in compose and 99 plus one skipped in the cluster). Design rationale is in ADR 0006 (authentication), ADR 0007 (admin writes), ADR 0008 (checkout) and ADR 0009 (payment).
 
 ## Authentication and sessions
 
@@ -98,7 +98,7 @@ Status: slice 3a matches the implemented code and its tests (API 100% line and b
 
 ## Cart and checkout (slice 4a)
 
-Each claim below was checked against the 4a code. Design rationale is in ADR 0008. The payment and webhook parts arrive in 4b.
+Each claim below was checked against the 4a code. Design rationale is in ADR 0008. The payment and webhook parts are in the next section.
 
 ### Assets
 
@@ -145,6 +145,57 @@ Caps are per account; accounts are free once self-registration arrives (R36 in 4
 | K16 | Stale privileges after a customer is disabled | Elevation | Revalidation as in A9 (R42) |
 | K17 | A failed checkout leaves partial state | Tampering | One transaction; any 409 or failure rolls back reservation, order and key row, so a retry runs again |
 
+## Payment and webhook (slice 4b)
+
+Checked against the implemented code and its tests. Design rationale and deviations from the original design are in ADR 0009.
+
+### Assets
+
+| Asset | Why it matters |
+|---|---|
+| Webhook secret (`SHOP_PAYMENT_WEBHOOK_SECRET`) | Forges payment events; one value signs and verifies |
+| Order and payment state | A forged or replayed event could mark an unpaid order paid, or move stock |
+| Fake provider tokens | Capability to complete a payment on the provider page |
+| Event registry (`event_publication`, dead letter) | Holds pending side effects; poisoned entries replay actions |
+| Mailpit contents | Order emails and verification links for every account |
+| `orders.email` and `order_email` | Personal data at rest (R45) |
+
+### Trust boundaries
+
+| Boundary | Crossing | Control |
+|---|---|---|
+| Internet to webhook | Unauthenticated POST, body up to 64 KiB | Own `@Order(1)` stateless chain; HMAC-SHA256 over `t` and raw body; 300 s window; exact path match |
+| Provider (the fake) to API | Signed event over HTTP to the pod itself | Same verifier as a real provider would face; the fake shares the key (R47) |
+| Browser to fake provider page | Token in the URL | 32 random bytes; any signed-in customer holding it can complete, as on a real page; masked in API logs |
+| API to Mailpit | SMTP on 1025 | Local overlay only; NetworkPolicies allow api and keycloak; timeouts 2 s and 5 s |
+| Listener to the outside | Mail, refund and webhook calls from async threads | `NOT_SUPPORTED` listeners, short transactions around the I/O, bounded pool |
+
+### STRIDE
+
+| # | Threat | Category | Mitigation |
+|---|---|---|---|
+| P1 | Forged webhook | Spoofing, tampering | HMAC-SHA256 over `t + "." + rawBody` with the secret, compared with `MessageDigest.isEqual` on decoded bytes; missing, malformed, duplicated or unknown elements give the same 401 `webhook-signature`; the body is parsed only after the check; `WebhookIT` and `WebhookVerifierTest` cover each branch |
+| P2 | Replay of a captured event | Tampering | Timestamp window of 300 s (301 s old or ahead gives 401); the event id is stored, a duplicate gets 200 with no effect; payment states are monotonic, so even a fresh id for the same payment changes nothing |
+| P3 | Timing attack on the signature | Information disclosure | Constant-time comparison; one fixed error for every failure; the log names the reason, never the header |
+| P4 | Oversized or wrong-type body | Denial of service | Counting stream stops at 64 KiB + 1 whatever `Content-Length` says (413, `Connection: close`); `Content-Type` must parse as `application/json` (415); the 16 KiB filter exempts only `POST` with the exact URI (`BodyLimitIT`). Spring's path matching decodes percent-encoded spellings (`/api/payments/%77ebhook`) while the body-limit filter compares the raw URI, so those spellings reach the webhook with its own stricter limits and the same HMAC check; accepted (`WebhookIT`) |
+| P5 | Webhook reachable with the wrong chain, or CSRF exemption spreading | Elevation | `@Order(1)` chain matched by `POST /api/payments/webhook` only; no session, no `Set-Cookie`, a session cookie is ignored; every other path, method and variant falls to the main chain's `denyAll`; `CsrfIT` still requires CSRF on every other unsafe route; the single CSRF exemption is `WebhookSecurityConfiguration` (`.csrf(csrf -> csrf.disable())`), and when the repository goes public CodeQL's `java/spring-disabled-csrf-protection` alert on it is dismissed with ADR 0009's text |
+| P6 | Valkey outage or a session cookie breaks the webhook | Denial of service | Session filters sit outside both chains and four code paths read the session id even on a stateless chain; all four are switched off: the webhook chain disables `sessionManagement` and anonymous authentication, `spring.mvc.publish-request-handled-events=false` and a no-op `FlashMapManager` (`NoFlashMapManagerConfiguration`) cover the MVC reads. `WebhookValkeyIT` pays an order with Valkey stopped and a session cookie sent along (C18). The last two also remove a Valkey read from every request that carries a session cookie |
+| P7 | Secret leak or weak secret | Information disclosure | At least 32 characters, checked at startup with a message that holds no value; `toString` redacts it; never in logs or event payloads; `PaymentPropertiesTest` starts with a 20-character secret and asserts the value appears in neither the failure nor the output (C8). Rotation needs a deploy (R39) |
+| P8 | Fake token leaks through access logs | Information disclosure | `ApiRequestFilter` replaces the segment after `/api/fake-psp/payments/` with `***`, with or without a suffix or trailing slash, matching on the routed path (path parameters dropped, percent-decoding, repeated slashes and dot segments collapsed; an undecodable path logs `[undecodable path]`), and `ApiRequestFilterTest` asserts the token is absent from captured output for the page, `/complete`, trailing-slash, encoded, `;`-parameterised and normalised forms (C4). Other sinks still hold it (R48) |
+| P9 | Capture for an unknown payment, or two captures for one order | Tampering | Unknown payment: 404 so the provider retries, plus a `payment_webhook_unmatched` row. A second capture (another provider payment id for the same merchant reference, or a success on an order that is already paid) leaves the order unchanged and is refunded, never a no-op (C1) |
+| P10 | Amount or currency mismatch | Tampering | Order unchanged, payment refunded for the amount received, anomaly logged; a pending order keeps its reservation and expires normally |
+| P11 | Late success takes stock that others reserved, or oversells | Tampering | `takeLate` locks stock rows, checks every line, and takes all or nothing; inside the 30 minute window with every product active, else refund; stock effect is applied before the status is written, with a refund fallback (C2); `LatePaymentIT` checks every `stock` row, its `version` and the invariant `reserved = sum(active reservations)` |
+| P12 | Webhook races the expiry job, a refund or a second payment start | Tampering | One lock order (ADR 0008, 0009): order, payment, products, stock; the webhook locks the order, then the payment (`payment.order_id` never changes, so no ownership re-check is needed after the order lock); `PaymentRaceIT` races the webhook against the expiry job, a payment start and a refund, and duplicate deliveries at once |
+| P13 | Poisoned or stuck outbox entry | Tampering, denial of service | Events hold ids only, no personal data; listeners run on a bounded pool; entries over 48 attempts move to the dead-letter table and are logged; a backlog inside its backoff cannot hide a due entry (C10); stale in-flight entries recover after `staleness.published` (10 minutes) plus the first backoff step (C11); `EventRetryJobIT` covers the 200-per-run cap, the backlog case and the recovery |
+| P14 | Mail failure leaks an address into logs | Information disclosure | Listener failures are rethrown with a message of order id and exception class and no cause; the async handler logs no stack trace; a test with a `MailSendException` naming an address asserts it is absent from the output (C7, `OutboxIT`) |
+| P15 | Spoofed or injected recipient | Spoofing, tampering | Mail only to `orders.email`, from a verified, bounded claim refreshed at payment start; the mailer rejects CR, LF, malformed or over-long addresses; self-registration needs email verification; changing the address afterwards in the account console is R51 |
+| P16 | Duplicate email | Tampering | `order_email` claim (`SENDING`, `SENT`, `FAILED`); a fresh claim defers instead of sending; a crash between send and commit can send twice (R41) |
+| P17 | A hung mail or webhook call exhausts threads or connections | Denial of service | Timeouts (2 s, 5 s), `NOT_SUPPORTED` listeners with no transaction held across I/O, pool size 8 and queue 500, readiness independent of Mailpit; `OutboxIT` shows `GET /api/products` and checkout still answer in 2 s with SMTP hung, and the mail arrives once after it recovers |
+| P18 | Another customer's payment page or order | Information disclosure | Payment start is owner-scoped (404 for others, as K1); the fake page is guarded by an unguessable token and the `CUSTOMER` role |
+| P19 | Fake provider in a real deployment | Spoofing | `shop.payment.provider` has no default and only `fake` is allowed; WARN at startup; `/api/fake-psp/**` is 404 when off; a cloud overlay must set a real provider (R47) |
+| P20 | Webhook tables grow without bound | Denial of service | `PaymentMaintenanceJob` (in `payment`, because `order` may not depend on it) purges `payment_webhook_event` and `payment_webhook_unmatched` after 7 days in batches of 1000, hourly; older replays fail the timestamp check anyway (C15, C21; `PaymentMaintenanceIT`) |
+| P21 | Open redirect through `redirectUrl` or `returnUrl` | Tampering | The web accepts only same-origin `/fake-psp/<token>` and `/orders/<uuid>`; others show the generic error |
+
 ## Residual risks
 
 | # | Risk | Impact | Planned handling |
@@ -184,15 +235,26 @@ Caps are per account; accounts are free once self-registration arrives (R36 in 4
 | R33 | Admin-supplied names can render visually empty or overlap nearby text | Confusing display; no script execution (React escapes, plain-text rule) | Accepted as admin-trusted content |
 | R34 | No `statement_timeout`: slow admin searches or deep audit pages hold pool connections shared with the public catalog | Admin-triggered pool pressure | Slice 5 |
 | R35 | Module write methods (`ProductAdministration`, `StockManagement`) require an existing transaction, so audit completeness depends on callers going through the admin service | A future caller inside its own transaction could change data without an audit row | Mitigated by `Propagation.MANDATORY` and the method guards, not eliminated; review new callers |
-| R37 | Cancel-and-reorder churn grows `orders`, `order_line`, `reservation` and `idempotency_key` without bound | Table growth and slower queries; idempotency keys are purged after 24 h | Slice 5 rate limits; retention for orders in the cloud guide |
+| R36 | Free accounts make every cap per account, not per attacker | Hoarding (K10), cart and order churn, and registration spam are bounded per account only; Mailpit fills with verification mail locally | Slice 5 rate limits; cloud guide (CAPTCHA, real mail provider) |
+| R37 | Cancel-and-reorder churn grows `orders`, `order_line`, `reservation`, `payment`, `order_email` and `idempotency_key` without bound | Table growth and slower queries; idempotency keys are purged after 24 h, and `payment_webhook_event` and `payment_webhook_unmatched` after 7 days (`PaymentMaintenanceJob`) | Slice 5 rate limits; retention for orders in the cloud guide |
+| R38 | Mailpit is a local-only, unauthenticated mail sink | Anyone who can reach its UI or API reads every mailbox, including verification links, so can verify any address registered locally | Local overlays only, never `base`; NetworkPolicies limit SMTP to api and keycloak; a real mail provider in the cloud |
+| R39 | One webhook secret signs and verifies | A leak forges events; rotation needs a deploy; two `v1` values are refused rather than supported | Per-environment secret from `make secrets`; rotation procedure and two-key support deferred to the cloud guide |
+| R40 | The public webhook costs a body read (up to 64 KiB) and an HMAC before it can refuse | Cheap abuse of CPU and connections | Size cap, fixed refusals; slice 5 rate limits and gateway limits |
+| R41 | Effects are at least once | An email can be sent twice after a crash between send and commit; the refund and webhook calls are idempotent by key and event id | Accepted; documented |
 | R42 | Customer revocation lags up to `revalidate-after` (5 min), or the 15-minute grace with Keycloak down | A disabled customer can still use cart and checkout for that long | Accepted, as R14 and R23 |
 | R43 | Hot stock rows serialise checkouts; waits past `lock_timeout` (3 s) give 503 | A flash sale on one product shows errors to some customers; no oversell | Retry; slice 5 load tests (k6) |
 | R44 | `available` and `out-of-stock` reveal stock to signed-in customers | A competitor can probe whether a product is in stock. Setting a cart line to 1, 2, ... 10 and reading `available` on each `GET /api/cart` gives the exact free stock whenever it is 10 or less; `out-of-stock` at checkout gives the same answer. Larger stock stays hidden | Accepted |
-| R45 | Personal data at rest: `orders.email` (and, from 4b, mail in Mailpit) | Email addresses kept with orders; no erasure procedure yet | Retention and erasure procedure in the cloud guide |
+| R45 | Personal data at rest: `orders.email`, `order_email` and mail kept in Mailpit (local only, until restart or the 500 message cap) | Email addresses kept with orders; no erasure procedure yet | Retention and erasure procedure in the cloud guide |
 | R46 | Many concurrent `FOR SHARE` locks on a product (multixacts) delay an admin price change | An admin write waits, or gets 503 past `lock_timeout`, during heavy checkout | Accepted; retry |
+| R47 | The fake provider's key equals the verifier's | The HMAC trust boundary is simulated: the fake is in the same process and reads the same property, so the tests prove the verifier, not key separation | Real provider with its own signing secret in the cloud; `fakepsp` ships in the binary and must not be enabled there |
+| R48 | Fake payment tokens appear outside the API's masked log: Envoy's access log, the web nginx access log (the `/fake-psp/<token>` page load), browser history, and span URLs once slice 5 exports traces | The token is the capability to complete one test payment | Accepted for the fake (no money, local); API request logs mask it (P8); mask or drop the path in slice 5 trace and access-log setup |
 | R49 | A seed re-run during a rolling deploy can lock rows in another order than ascending id | A deadlock or 503 for one request; local stacks only (the seed does not run in the cloud) | Accepted for local |
 | R50 | The expiry job is the only bulk path that returns stock held by overdue orders (cancel releases lazily; reads do not write) | If the job stalls or a batch fails persistently, reserved stock leaks and products read as out of stock until it is fixed; nothing monitors the job yet | Alerting and job metrics in slice 5 (observability); until then the logs carry release counts only |
+| R51 | Changing the address in Keycloak's account console | Keycloak resets `email_verified` and requires verification at the next sign-in; the session already in use keeps the old verified address, so the confirmation goes there and never to the new one. A flag that stayed true would let order mail reach an unverified address | Covered by `payment.spec.ts` (fresh sign-in shows `Email verification` and gives no shop session; no confirmation reaches the new address); if Keycloak ever stops requiring re-verification the test fails, and the fallback is to remove `manage-account` from the default role (ADR 0009) |
+| R52 | Anyone can register a stranger's address, and with password reset off the address stays locked once the verification link expires | The owner of that address cannot register; with a real mail provider the flow sends verification mail to any address | Cloud guide: password reset or cleanup of unverified accounts, CAPTCHA, rate limits (slice 5) |
+| R53 | A dead-lettered refund leaves the order in `REFUND_PENDING` (a dead-lettered webhook delivery leaves it unpaid) | Money held with no automatic follow-up; `EventRetryJob` logs a WARN per listener with the count when it parks publications, but nothing alerts until slice 5 | Alerting in slice 5; manual resubmission from the dead-letter table (README) |
+| R54 | The realm hard-codes `smtpServer.host: mailpit` | A cloud overlay that forgets to replace it fails loudly (verification mail cannot be sent) and leaks nothing | Cloud overlay replaces the SMTP settings |
 
 ## Out of scope for this section
 
-Payment, webhooks, the outbox and email (slice 4b; R36, R38 to R41, R47 and R48 are reserved for it); TLS and HSTS, MFA, self-registration (cloud or later); supply chain signing (slice 6).
+TLS and HSTS, MFA, a real payment provider and a production mail provider (cloud or later); supply chain signing (slice 6).

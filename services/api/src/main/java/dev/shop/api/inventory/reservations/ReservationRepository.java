@@ -71,4 +71,49 @@ class ReservationRepository {
                 .param("orders", orderIds)
                 .update();
     }
+
+    void consumeStock(long productId, int quantity) {
+        jdbc.sql("""
+                        UPDATE stock SET on_hand = on_hand - :quantity, reserved = reserved - :quantity,
+                                         version = version + 1
+                        WHERE product_id = :id
+                        """).param("id", productId).param("quantity", quantity).update();
+    }
+
+    void markConsumed(UUID orderId) {
+        jdbc.sql("UPDATE reservation SET status = 'CONSUMED' WHERE order_id = :order AND status = 'ACTIVE'")
+                .param("order", orderId)
+                .update();
+    }
+
+    /** Locks the stock rows in ascending product id and returns what is free on each. */
+    Map<Long, Integer> lockFreeStock(Collection<Long> productIds) {
+        Map<Long, Integer> free = new LinkedHashMap<>();
+        jdbc.sql("""
+                        SELECT product_id, on_hand - reserved AS free FROM stock
+                        WHERE product_id IN (:ids) ORDER BY product_id FOR UPDATE
+                        """).param("ids", productIds).query(rs -> {
+            free.put(rs.getLong("product_id"), rs.getInt("free"));
+        });
+        return free;
+    }
+
+    void takeStock(long productId, int quantity) {
+        jdbc.sql("UPDATE stock SET on_hand = on_hand - :quantity, version = version + 1 WHERE product_id = :id")
+                .param("id", productId)
+                .param("quantity", quantity)
+                .update();
+    }
+
+    void insertConsumed(UUID orderId, long productId, int quantity, OffsetDateTime now) {
+        jdbc.sql("""
+                        INSERT INTO reservation (order_id, product_id, quantity, status, created_at)
+                        VALUES (:order, :product, :quantity, 'CONSUMED', :now)
+                        """)
+                .param("order", orderId)
+                .param("product", productId)
+                .param("quantity", quantity)
+                .param("now", now)
+                .update();
+    }
 }

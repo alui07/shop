@@ -16,4 +16,5 @@ record CheckoutProperties(
         @Min(1) @DefaultValue("10") int maxReservedPerProduct,
         @NotNull @DefaultValue("24h") Duration idempotencyTtl,
         @Min(1) @DefaultValue("50") int expiryBatchSize,
-        @Min(1) @DefaultValue("1000") int maintenanceBatchSize) {}
+        @Min(1) @DefaultValue("1000") int maintenanceBatchSize,
+        @NotNull @DefaultValue("30m") Duration latePaymentWindow) {}

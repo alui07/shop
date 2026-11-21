@@ -7,16 +7,23 @@ import java.lang.annotation.Target;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.TestPropertySource;
 
-/** The containers and settings every application context in the tests needs: Postgres, Valkey and the auth settings. */
+/** The containers and settings every application context in the tests needs: Postgres, Valkey, Mailpit and the auth and payment settings. */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
-@Import({PostgresTestConfiguration.class, ValkeyTestConfiguration.class, IdentityProviderTestConfiguration.class})
+@Import({
+    PostgresTestConfiguration.class,
+    ValkeyTestConfiguration.class,
+    MailpitTestConfiguration.class,
+    IdentityProviderTestConfiguration.class
+})
 @TestPropertySource(
         properties = {
             "shop.auth.public-origin=https://shop.example.test",
             "shop.auth.issuer=https://idp.example.test/realms/shop",
             "shop.auth.internal-realm-url=http://localhost:1/realms/shop",
             "shop.auth.client-id=shop-api",
-            "shop.auth.client-secret=test-client-secret-test-client-secret"
+            "shop.auth.client-secret=test-client-secret-test-client-secret",
+            "shop.payment.provider=fake",
+            "shop.payment.webhook-secret=test-webhook-secret-test-webhook-secret"
         })
 public @interface TestInfrastructure {}

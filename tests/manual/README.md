@@ -34,7 +34,7 @@ Checks that cannot be automated here. Each has the reason, the steps, the expect
     3. Zero-drop rollout: in terminal A run `make cluster-traffic`. In terminal B run `make kubectl ARGS="-n shop rollout restart deploy/api"`, then `make kubectl ARGS="-n shop rollout status deploy/api"`. Terminal A must print no `FAIL`. Repeat for `web`.
     4. Database outage: `make kubectl ARGS="-n shop delete pod shop-db-1"`. `/status` shows the API unavailable, then recovers without a reload once CNPG restarts the instance.
     5. Pod Security: `make kubectl ARGS="-n shop run pss-check --image=busybox --restart=Never -- id"` is rejected by `restricted`.
-    6. `make kubectl ARGS="-n shop get networkpolicy"` lists the sixteen policies. `make kubectl ARGS="get pods -A"` shows Calico, Envoy Gateway and CNPG running.
+    6. `make kubectl ARGS="-n shop get networkpolicy"` lists the nineteen policies (sixteen in `base`, three for Mailpit in the local overlay). `make kubectl ARGS="get pods -A"` shows Calico, Envoy Gateway and CNPG running.
     7. Memory: `docker stats shop-control-plane --no-stream`; compare with the figure in `README.md` (about 3.5 GiB with Keycloak).
     8. `make cluster-down`. `docker ps` shows no `shop-control-plane`.
   - Expected: every step behaves as described.
@@ -128,7 +128,7 @@ Run these on `make dev` (http://localhost:5173) as `admin@example.test` unless a
 
 ## Cart and checkout (slice 4a)
 
-Run these on `make dev` (http://localhost:5173) as `customer@example.test` unless a step says otherwise. Read passwords from `.cache/secrets/shop.env`; do not paste them into notes or issues. The reservation lasts 15 minutes; to watch it expire sooner, add `SHOP_CHECKOUT_RESERVATIONTTL: 1m` (Spring drops the dash in `reservation-ttl`) to the `api` service environment in `deploy/compose/compose.yaml` and restart the stack (the expiry job runs every 30 s); revert the edit afterwards. There is no payment yet, so orders only end as Cancelled or Expired.
+Run these on `make dev` (http://localhost:5173) as `customer@example.test` unless a step says otherwise. Read passwords from `.cache/secrets/shop.env`; do not paste them into notes or issues. The reservation lasts 15 minutes; to watch it expire sooner, add `SHOP_CHECKOUT_RESERVATIONTTL: 1m` (Spring drops the dash in `reservation-ttl`) to the `api` service environment in `deploy/compose/compose.yaml` and restart the stack (the expiry job runs every 30 s); revert the edit afterwards. Payment is covered in the next section.
 
 - [ ] **Cart, checkout and orders by keyboard and screen reader**
   - Why manual: axe does not judge focus order, announcements or wording.
@@ -149,6 +149,30 @@ Run these on `make dev` (http://localhost:5173) as `customer@example.test` unles
   - Why manual: it needs several orders in a row and a read of the wording.
   - Steps: place orders (cancel none) until the customer holds 10 units of one product in total, then try to check out one more unit of it. Then, with three orders awaiting payment, try a fourth.
   - Expected: the first refusal says which product cannot be reserved until unpaid orders are paid or cancelled; the fourth order is refused with the pending-orders message; the alerts are announced and keep the cart intact. Cancel the orders afterwards.
+
+## Payment, email and registration (slice 4b)
+
+Run these on `make dev` (http://localhost:5173, Mailpit on http://localhost:8025) unless a step says otherwise. Read passwords from `.cache/secrets/shop.env`; do not paste them into notes or issues.
+
+- [ ] **Pay and decline on the fake provider page**
+  - Why manual: it checks what a person sees across three pages and the wording of each state; e2e checks the effects.
+  - Steps: as `customer@example.test`, place an order and choose `Pay now`. On the provider page choose `Decline`, then `Pay now` again and choose `Pay`.
+  - Expected: the provider page shows the amount, the merchant reference and when the session ends. After `Decline` the order is still `Awaiting payment` and `Pay now` is offered. After `Pay` the order page shows `Payment is being confirmed.`, then `Paid`; Mailpit holds exactly one message `Your order <first 8 characters of the id> is confirmed` for the customer's address.
+
+- [ ] **Mailpit stopped, then started, delivers the email once**
+  - Why manual: it needs a person to stop and start a container and to count messages.
+  - Steps: `docker compose --env-file .cache/secrets/shop.env -f deploy/compose/compose.yaml stop mailpit`, pay an order as above, wait for `Paid` (the order is paid even though no mail can be sent), then start Mailpit again with the same command with `start` and wait up to about 3 minutes (the retry job runs every 60 s and waits 1 minute after the first failure).
+  - Expected: exactly one confirmation arrives for that order, and `make logs` shows no email address and no stack trace for the failed attempts.
+
+- [ ] **Register and verify**
+  - Why manual: it follows a real link in a real browser, with another person's eyes on the wording of Keycloak's pages.
+  - Steps: sign out, choose `Sign in`, then `Register` and fill in username, email, first and last name (there is no password field). Open http://localhost:8025 and open the `Verify email` message. Before following its link, try to sign in with the new address. Then follow the link in the same browser, set a password on the `Update password` page and submit.
+  - Expected: after `Register` the page says `Email verification`; sign-in before the link asks for verification again; after the password is set you land in the shop signed in, and `Sign out` and a new sign-in with the password work. Place and pay an order: the confirmation goes to the new address.
+
+- [ ] **Keyboard and screen-reader pass on the fake provider page and the confirming status**
+  - Why manual: axe cannot judge announcements or focus order.
+  - Steps: with a screen reader on, use only the keyboard to start a payment from the order page, reach the provider page, tab to `Decline` and `Pay`, press `Pay`, and stay on the order page while it confirms. Repeat once with a session that has expired (use the shortened hold from the checkout section, wait for it to end plus the 5 minute grace, then press `Pay`).
+  - Expected: focus order is logical and visible; the provider page's heading, amount and session end are announced; `Pay` and `Decline` are not skipped while a request is pending (they use `aria-disabled`, not `disabled`); `Payment is being confirmed.` is announced as a status without moving focus; the expired session shows `This payment has expired` as an alert and moves focus to it.
 
 ## After the first push to GitHub
 

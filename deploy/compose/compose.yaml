@@ -91,6 +91,8 @@ services:
     depends_on:
       keycloak-db:
         condition: service_healthy
+      mailpit:
+        condition: service_healthy
 
   mailpit:
     image: ${MAILPIT_IMAGE:?set by make}
@@ -121,6 +123,10 @@ services:
       SHOP_AUTH_INTERNAL_REALM_URL: http://keycloak:8080/realms/shop
       SHOP_AUTH_CLIENT_ID: shop-api
       SHOP_AUTH_CLIENT_SECRET: ${SHOP_AUTH_CLIENT_SECRET:?run make secrets}
+      SHOP_PAYMENT_PROVIDER: fake
+      SHOP_PAYMENT_WEBHOOK_SECRET: ${SHOP_PAYMENT_WEBHOOK_SECRET:?run make secrets}
+      SPRING_MAIL_HOST: mailpit
+      SPRING_MAIL_PORT: "1025"
     volumes:
       - ../../services/api:/workspace
       - ../../.cache/m2:/cache/m2
@@ -131,6 +137,8 @@ services:
       valkey:
         condition: service_healthy
       keycloak:
+        condition: service_healthy
+      mailpit:
         condition: service_healthy
 
   web:

@@ -75,6 +75,8 @@ class SeedProfileIT {
                         "--shop.auth.internal-realm-url=" + identityProvider.internalRealmUrl(),
                         "--shop.auth.client-id=shop-api",
                         "--shop.auth.client-secret=" + StubIdentityProvider.CLIENT_SECRET,
+                        "--shop.payment.provider=fake",
+                        "--shop.payment.webhook-secret=test-webhook-secret-test-webhook-secret",
                         "--spring.data.redis.host=" + valkey.getHost(),
                         "--spring.data.redis.port=" + valkey.getMappedPort(6379),
                         "--spring.datasource.url=" + postgres.getJdbcUrl(),
