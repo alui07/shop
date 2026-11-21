@@ -6,7 +6,8 @@ spring:
     username: ${SPRING_DATASOURCE_USERNAME:shop}
     password: ${SPRING_DATASOURCE_PASSWORD:}
     hikari:
-      maximum-pool-size: 20
+      maximum-pool-size: 15
+      minimum-idle: 5
       data-source-properties:
         options: "-c lock_timeout=3s"
   flyway:
@@ -87,6 +88,10 @@ springdoc:
 management:
   server:
     port: 8081
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
   tracing:
     sampling:
       probability: 1.0

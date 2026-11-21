@@ -54,11 +54,16 @@ public class StockReservations {
         releaseAll(List.of(orderId));
     }
 
-    /** Gives back the active holds of all these orders, adding up per product so each stock row is updated once. */
+    /**
+     * Gives back the active holds of all these orders, adding up per product so each stock row is updated once.
+     * Returns the number of units given back.
+     */
     @Transactional(propagation = Propagation.MANDATORY)
-    public void releaseAll(Collection<UUID> orderIds) {
-        repository.activeQuantityByProduct(orderIds).forEach(repository::giveBack);
+    public int releaseAll(Collection<UUID> orderIds) {
+        Map<Long, Integer> held = repository.activeQuantityByProduct(orderIds);
+        held.forEach(repository::giveBack);
         repository.markReleased(orderIds);
+        return held.values().stream().mapToInt(Integer::intValue).sum();
     }
 
     /** The order was paid inside its hold: the held units leave the shelf for good. */

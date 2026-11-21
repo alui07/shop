@@ -1,0 +1,69 @@
+# Reached through the shared Gateway at http://grafana.localhost:8088 (HTTPRoute in this namespace). The admin password is the Secret grafana-admin
+# that obs-up creates from GRAFANA_ADMIN_PASSWORD; anonymous visitors are Viewers. The dashboard is the ConfigMap shop-dashboards that obs-up
+# creates from deploy/observability/dashboards/.
+admin:
+  existingSecret: grafana-admin
+  userKey: admin-user
+  passwordKey: admin-password
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+grafana.ini:
+  server:
+    root_url: http://grafana.localhost:8088/
+  analytics:
+    check_for_updates: false
+    reporting_enabled: false
+  auth.anonymous:
+    enabled: true
+    org_role: Viewer
+dashboardProviders:
+  dashboardproviders.yaml:
+    apiVersion: 1
+    providers:
+      - name: shop
+        folder: Shop
+        type: file
+        disableDeletion: true
+        options:
+          path: /var/lib/grafana/dashboards/shop
+dashboardsConfigMaps:
+  shop: shop-dashboards
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        uid: prometheus
+        url: http://prometheus-server.obs.svc.cluster.local:80
+        isDefault: true
+        jsonData:
+          timeInterval: 15s
+      - name: Tempo
+        type: tempo
+        uid: tempo
+        url: http://tempo.obs.svc.cluster.local:3200
+        jsonData:
+          tracesToLogsV2:
+            customQuery: true
+            datasourceUid: loki
+            query: '{$${__tags}} | trace_id = "$${__trace.traceId}"'
+            tags:
+              - key: service.name
+                value: service_name
+      - name: Loki
+        type: loki
+        uid: loki
+        url: http://loki.obs.svc.cluster.local:3100
+        jsonData:
+          derivedFields:
+            - name: trace_id
+              matcherType: label
+              matcherRegex: trace_id
+              url: $${__value.raw}
+              datasourceUid: tempo
+              urlDisplayLabel: "Trace: $${__value.raw}"

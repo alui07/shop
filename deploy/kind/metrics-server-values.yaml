@@ -1,0 +1,3 @@
+# kind's kubelet serves a self-signed certificate. --metric-resolution=15s is the chart default and is not repeated.
+args:
+  - --kubelet-insecure-tls

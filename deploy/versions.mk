@@ -59,6 +59,30 @@ ENVOY_GATEWAY_CHART_VERSION := v1.10.0
 # renovate: datasource=helm depName=cloudnative-pg registryUrl=https://cloudnative-pg.github.io/charts
 CNPG_CHART_VERSION := 0.29.1
 
+# renovate: datasource=helm depName=metrics-server registryUrl=https://kubernetes-sigs.github.io/metrics-server/
+METRICS_SERVER_CHART_VERSION := 3.14.0
+# Image of chart 3.14.0 (app v0.9.0); the chart pins only by tag, so the digest is passed with --set. Bump together with the chart.
+# renovate: datasource=docker depName=registry.k8s.io/metrics-server/metrics-server
+METRICS_SERVER_IMAGE := registry.k8s.io/metrics-server/metrics-server:v0.9.0@sha256:d9862115e7c7881280d3d75ca26bda8ffc0fc213315979575bf23ce9826205c0
+
+# Observability stack for `make obs-up` (kind) and `make dev OBS=1` (compose). Grafana and Tempo charts moved to grafana-community (2026-01-30); Loki stays on grafana.github.io.
+# Chart-bundled images (Prometheus, Grafana, Tempo, Loki) stay pinned by the chart's own tag; digests come with slice 6.
+# renovate: datasource=helm depName=prometheus registryUrl=https://prometheus-community.github.io/helm-charts
+PROMETHEUS_CHART_VERSION := 29.47.2
+# renovate: datasource=helm depName=grafana registryUrl=https://grafana-community.github.io/helm-charts
+GRAFANA_CHART_VERSION := 14.4.1
+# renovate: datasource=helm depName=tempo registryUrl=https://grafana-community.github.io/helm-charts
+TEMPO_CHART_VERSION := 3.2.1
+# renovate: datasource=helm depName=loki registryUrl=https://grafana.github.io/helm-charts
+LOKI_CHART_VERSION := 7.6.0
+# renovate: datasource=helm depName=opentelemetry-collector registryUrl=https://open-telemetry.github.io/opentelemetry-helm-charts
+OTEL_COLLECTOR_CHART_VERSION := 0.178.3
+# The k8s distribution (chart command.name otelcol-k8s); the chart sets no default repository. Same release as the chart's appVersion.
+# renovate: datasource=docker depName=otel/opentelemetry-collector-k8s
+OTEL_COLLECTOR_IMAGE := otel/opentelemetry-collector-k8s:0.163.2@sha256:cce4142919331aa26dd9e2900b0583dac12c44d2f87c270d3a2110912d4785a9
+# renovate: datasource=docker depName=grafana/otel-lgtm
+OTEL_LGTM_IMAGE := grafana/otel-lgtm:0.41.0@sha256:2e3290657f2f2a256c7a9175f097424a3ac5b54840741ace433e108e109348b6
+
 # Schema commits for k8s-lint; update by hand together with the node image and chart versions (the CRD schemas must match the charts).
 K8S_SCHEMAS_REF := 9367d1ce1c88b8bbf6ee06d0e80510f26394913f
 CRD_SCHEMAS_REF := 49729e49e8f062933e3716a26540d41b0cd0856c

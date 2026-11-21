@@ -1,0 +1,12 @@
+# Single binary, local storage on an emptyDir, six hours of traces. OTLP gRPC on 4317 for the collector.
+tempo:
+  retention: 6h
+  reportingEnabled: false
+  resources:
+    requests:
+      cpu: 50m
+      memory: 192Mi
+    limits:
+      memory: 384Mi
+persistence:
+  enabled: false

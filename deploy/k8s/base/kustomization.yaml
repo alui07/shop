@@ -5,6 +5,8 @@ resources:
   - namespace.yaml
   - api.yaml
   - web.yaml
+  - hpa.yaml
+  - pdb.yaml
   - postgres.yaml
   - keycloak-db.yaml
   - valkey.yaml

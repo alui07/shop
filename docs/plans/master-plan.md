@@ -86,7 +86,7 @@ Create each branch from an up-to-date `main` when its slice starts, not ahead of
 | Repo `CLAUDE.md` (before slice 3) | `docs-repo-claude-md` |
 | 3 | `slice-3-auth` |
 | 4 | `slice-4-checkout` |
-| 5 | `slice-5-load-and-observability` |
+| 5 | `slice-5a-observability`, `slice-5b-loadtest`, then `slice-5c-limits` (split by D31 and D38) |
 | 6 | `slice-6-supply-chain-gitops` |
 
 ## Process per slice (global instructions)

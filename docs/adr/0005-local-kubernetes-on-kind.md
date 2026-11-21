@@ -45,7 +45,7 @@ Slice 2 runs slice 1 in Kubernetes: Envoy Gateway in front, Postgres from CloudN
 | `db-ingress` | Postgres from `api` on 5432, from the CNPG operator on 8000 and 5432, from other instances |
 | `db-egress` | Postgres to the Kubernetes API (TCP 6443 to `0.0.0.0/0`, because the kind node's address is assigned by Docker and differs between machines; policy is evaluated after DNAT) and to other instances |
 
-Namespaces outside `shop` get no policies in this slice.
+Namespaces outside `shop` get no policies; slice 5a adds `api-to-otel-collector` (egress from `api` to the collector in `obs`, TCP 4318) in the `otel` component, and `obs` itself has none (threat model R55).
 
 `tests/e2e/cluster/network-policy-test.sh` runs 2 connections that must work and 7 that must be dropped, from probe pods that satisfy restricted Pod Security. Probes in `shop` carry the labels of `api`, `web` and an unrelated app. A probe in a separate namespace `netpol-probe` (no policies) must be blocked from `api`, `web` and the database, which exercises ingress rules. Each check first resolves the name with `getent`, and a denial only passes on exit code 124 (timeout, since Calico drops packets). A refused connection or any other error fails the test, so it cannot pass by accident. Positive controls: `api` reaches the database, and the outside probe reaches `kube-dns`.
 
@@ -59,8 +59,24 @@ Namespaces outside `shop` get no policies in this slice.
 - `server.forward-headers-strategy: native` trusts `X-Forwarded-*` from internal addresses, and on kind the client address is internal. Before OAuth redirects depend on those headers, add an Envoy ClientTrafficPolicy or strip incoming forwarded headers.
 - Envoy's `PathPrefix /api` also matches a bare `/api`. The Compose gateway is aligned (`location ~ ^/api(/|$)`), so both stacks send `/api` and `/api/...` to the API and `/apiary` to the web app.
 
+## Slice 5a additions (observability, autoscaling)
+
+**metrics-server.** `cluster-up` installs it with Helm into `kube-system` (chart and image pinned in `deploy/versions.mk`, the image by digest, values `deploy/kind/metrics-server-values.yaml` with only `--kubelet-insecure-tls`, because kind's kubelet certificates are self-signed) and waits for the APIService `v1beta1.metrics.k8s.io`. A spike on the cgroup v1 node gave the first numbers about 32 s after install and scaled a test HPA from 1 to 3 pods in 64 s, so cgroup v1 is no obstacle.
+
+**Two API replicas and an HPA (D32).** `base` runs the API under HPA `api`: 2 to 4 replicas at 60% CPU of the 250m request, scale-up stabilisation 60 s (ignores the JIT spike after a pod turns ready; a sustained load still scales) and scale-down 120 s. The web app runs 2 fixed replicas. `cluster-e2e` therefore runs against two pods of each, which exercises the multi-replica paths ADR 0009 could only test in integration. `deploy` waits after the rollout until `deployment/api` has as many ready replicas as the HPA's `minReplicas`. `cluster-e2e` samples the HPA while it runs and writes a replica summary and the `SuccessfulRescale` events to `build/reports/cluster-e2e/hpa.log`.
+
+**The HPA owns `replicas`.** `api.yaml` has no `replicas`, so server-side apply does not reset the HPA's count on every `make deploy`; a second deploy keeps it. On a cluster applied by an older branch, `shop-deploy` owned `.spec.replicas` (1): the first 5a apply drops the field, it defaults to the current 1 (no drop) and the HPA raises it to 2. Going back to a branch from before 5a then fails with a field conflict on `replicas` (no `--force-conflicts`): recreate the cluster with `make cluster-down cluster-up deploy`.
+
+**`<unknown>` window.** A new target pod reads `cpu: <unknown>` for about 45 s, with `FailedGetResourceMetric` and `FailedComputeMetricsReplicas` warning events, until metrics-server has its first sample. That is expected; the readiness wait and the reports tolerate it and nothing asserts the absence of HPA warnings.
+
+**PodDisruptionBudgets.** `api` and `web`, `maxUnavailable: 1` (`deploy/k8s/base/pdb.yaml`). Keycloak, Valkey and Mailpit have a single replica, where a budget would block a drain forever; CNPG manages its own. The `api` and `web` budgets can also stall `kubectl drain` on this single-node cluster: the drained node is cordoned, so evicted replicas have nowhere to be rescheduled and the budget refuses the next eviction until a replacement is ready. `tests/e2e/cluster/pdb-test.sh`, run by `cluster-e2e` after Playwright, evicts one API pod through the Eviction API (accepted), immediately evicts another (HTTP 429 from the PDB), waits for the API to recover and checks that the metrics API serves `shop` pods.
+
+**Grafana on the shop Gateway.** The `http` listener's `allowedRoutes` selects the namespaces `shop` and `obs`; `make obs-up` adds an HTTPRoute `grafana` in `obs` for host `grafana.localhost`, so Grafana is at `http://grafana.localhost:8088` with no new host port and no cluster recreate. See ADR 0010.
+
+**cgroup v1 locally, v2 in CI.** Host facts on the owner's machine (2026-11-21): 15.6 GiB, 12 CPUs, cgroup v1, no `.wslconfig` (WSL's default of half the host memory applies). CI is cgroup v2. The metrics-server and `pdb-test.sh` behaviour on cgroup v2 is unverified until the first pull request run.
+
 ## Consequences
 
 - The laptop and CI run the same cluster configuration, and policy enforcement is tested, not assumed. They differ in cgroup version (see below).
-- Limits: the laptop needs `failCgroupV1: false` (cgroup v1); one node, one Postgres instance, data lost on `cluster-down`; local `:dev` images only; no TLS; after a Docker Desktop restart the cluster may not recover (`make cluster-down cluster-up deploy`); the cluster needs about 2.5 GB of memory on top of anything else running.
+- Limits: the laptop needs `failCgroupV1: false` (cgroup v1); one node, one Postgres instance, data lost on `cluster-down`; local `:dev` images only; no TLS; after a Docker Desktop restart the cluster may not recover (`make cluster-down cluster-up deploy`); the cluster needs about 3.7 GiB with two API pods and everything else running, and obs adds about 0.8 GiB of requests; going back to a pre-5a branch needs a cluster recreate (HPA ownership of `replicas`).
 - Calico is tracked through `github-tags`, which has release timestamps, and Renovate updates both the version comment and the commit SHA. The kubectl image (registry.k8s.io) and the CNPG operand images have no release timestamps, so the 7-day Renovate age gate holds their updates until someone looks.

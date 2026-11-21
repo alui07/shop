@@ -55,8 +55,8 @@ Slice 3a shipped sign-in, roles and a read-only admin product list. Slice 3b let
 
 - Admin writes need Valkey (session) and Keycloak (revalidation) to be reachable and fresh; the public catalog does not.
 - A demoted admin can write for up to 5 minutes while Keycloak is up; with Keycloak down, writes stop 5 minutes after the last success.
-- The audit log grows without bound (no rate limit before slice 5) and has no export or filter. A future export must neutralise CSV formula prefixes (`=`, `+`, `-`, `@`, tab, CR).
-- Admin request bodies are bounded only by Jackson's string limit until slice 5's gateway limits.
+- The audit log grows without bound (no rate limit before slice 5c) and has no export or filter. A future export must neutralise CSV formula prefixes (`=`, `+`, `-`, `@`, tab, CR).
+- Admin request bodies are bounded only by Jackson's string limit until slice 5c's gateway limits.
 - Slice 4 inherits the stock contract above and must not weaken it.
 - Residual risks are R21 to R31 in `docs/threat-model.md`.
 
