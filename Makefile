@@ -11,7 +11,7 @@ HOST_GID := $(shell id -g)
 CACHE_DIR := $(CURDIR)/.cache
 SECRETS_DIR := $(CACHE_DIR)/secrets
 SECRETS_FILE := $(SECRETS_DIR)/shop.env
-SECRET_KEYS := SHOP_AUTH_CLIENT_SECRET VALKEY_PASSWORD KEYCLOAK_DB_PASSWORD KC_BOOTSTRAP_ADMIN_PASSWORD SHOP_TEST_CUSTOMER_PASSWORD SHOP_TEST_ADMIN_PASSWORD
+SECRET_KEYS := SHOP_AUTH_CLIENT_SECRET VALKEY_PASSWORD KEYCLOAK_DB_PASSWORD KC_BOOTSTRAP_ADMIN_PASSWORD SHOP_TEST_CUSTOMER_PASSWORD SHOP_TEST_ADMIN_PASSWORD SHOP_PAYMENT_WEBHOOK_SECRET
 COMPOSE := docker compose --env-file $(SECRETS_FILE) -f deploy/compose/compose.yaml
 E2E_COMPOSE := docker compose --env-file $(SECRETS_FILE) -p shop-e2e -f tests/e2e/compose.yaml
 E2E_DOWN := $(E2E_COMPOSE) --profile runner down --volumes --remove-orphans
@@ -41,7 +41,7 @@ MVN_DOCKER := docker run --rm $(AS_HOST) -v $(CURDIR)/services/api:/workspace -v
 MVN_ARGS := -B -ntp -Dmaven.repo.local=/cache/m2/repository
 # Testcontainers needs the Docker socket; shared by every target that runs the integration tests.
 MVN_IT_DOCKER = -v /var/run/docker.sock:/var/run/docker.sock --group-add $(or $(DOCKER_SOCK_GID),$(error could not read the Docker socket GID; is Docker reachable?)) \
-	--add-host=host.docker.internal:host-gateway -e TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal -e POSTGRES_IMAGE -e VALKEY_IMAGE
+	--add-host=host.docker.internal:host-gateway -e TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal -e POSTGRES_IMAGE -e VALKEY_IMAGE -e MAILPIT_IMAGE
 
 export HOST_UID HOST_GID MAVEN_IMAGE POSTGRES_IMAGE VALKEY_IMAGE MAILPIT_IMAGE NGINX_IMAGE PLAYWRIGHT_IMAGE API_IMAGE WEB_IMAGE WEB_TOOLS_IMAGE MVN_ARGS \
 	KEYCLOAK_IMAGE KEYCLOAK_DEV_IMAGE \
@@ -279,6 +279,7 @@ cluster-up: cache-dirs k8s-tools ## Create the kind cluster with Calico, Envoy G
 		docker start $(CLUSTER_NAME)-control-plane; \
 	fi
 	@docker port $(CLUSTER_NAME)-control-plane 30089 >/dev/null 2>&1 || { echo "the kind node lacks the Keycloak port mapping (30089); recreate it: make cluster-down cluster-up" >&2; exit 1; }
+	@docker port $(CLUSTER_NAME)-control-plane 30025 >/dev/null 2>&1 || echo "Mailpit UI not on 127.0.0.1:8026; recreate with make cluster-down cluster-up to get it" >&2
 	@( umask 077; $(KIND) get kubeconfig --internal --name $(CLUSTER_NAME) > $(KIND_DIR)/kubeconfig ); chmod 600 $(KIND_DIR)/kubeconfig
 	@for attempt in $$(seq 60); do $(KUBECTL) get --raw /readyz >/dev/null 2>&1 && exit 0; sleep 2; done; echo "the API server did not become ready (/readyz)" >&2; exit 1
 	$(KUBECTL) apply --server-side -k deploy/kind/calico
@@ -308,32 +309,37 @@ $(K8S_DOCKER) -v $(SECRETS_DIR):/secrets:ro $(K8S_TOOLS_IMAGE) sh -c ' \
 	kubectl -n shop create secret generic shop-auth --from-literal="SHOP_AUTH_CLIENT_SECRET=$$SHOP_AUTH_CLIENT_SECRET" --dry-run=client -o yaml | apply; \
 	kubectl -n shop create secret generic valkey-auth --from-literal="VALKEY_PASSWORD=$$VALKEY_PASSWORD" --dry-run=client -o yaml | apply; \
 	kubectl -n shop create secret generic keycloak-test-users --from-literal="SHOP_TEST_CUSTOMER_PASSWORD=$$SHOP_TEST_CUSTOMER_PASSWORD" \
-		--from-literal="SHOP_TEST_ADMIN_PASSWORD=$$SHOP_TEST_ADMIN_PASSWORD" --dry-run=client -o yaml | apply'
+		--from-literal="SHOP_TEST_ADMIN_PASSWORD=$$SHOP_TEST_ADMIN_PASSWORD" --dry-run=client -o yaml | apply; \
+	kubectl -n shop create secret generic shop-payment --from-literal="SHOP_PAYMENT_WEBHOOK_SECRET=$$SHOP_PAYMENT_WEBHOOK_SECRET" --dry-run=client -o yaml | apply'
 endef
 
 # Namespace and Secrets go in before the workloads so no pod starts against an old Secret. Each Deployment carries a hash of only the Secrets it consumes
-# (values in a fixed order, never printed), so a changed secret rolls exactly its consumers. VALKEY_IMAGE (versions.mk) is the only Valkey pin.
+# (values in a fixed order, never printed), so a changed secret rolls exactly its consumers. VALKEY_IMAGE and MAILPIT_IMAGE (versions.mk) are the only pins for those images.
+# Mailpit exists only in overlays/local, which is the only overlay deploy-apply renders.
 # The image ID goes into a pod template annotation so a rebuilt :dev image rolls the pods exactly once and an unchanged one is a no-op.
 deploy-apply:
 	$(KIND) load docker-image --name $(CLUSTER_NAME) $(API_IMAGE) $(WEB_IMAGE) $(KEYCLOAK_DEV_IMAGE)
 	$(K8S_DOCKER) $(K8S_TOOLS_IMAGE) kubectl apply --server-side --field-manager=shop-deploy -f deploy/k8s/base/namespace.yaml
 	@$(call apply_secrets)
 	@$(K8S_DOCKER) -v $(SECRETS_DIR):/secrets:ro -e API_IMAGE_ID=$$(docker image inspect -f '{{.Id}}' $(API_IMAGE)) -e WEB_IMAGE_ID=$$(docker image inspect -f '{{.Id}}' $(WEB_IMAGE)) \
-		-e KEYCLOAK_IMAGE_ID=$$(docker image inspect -f '{{.Id}}' $(KEYCLOAK_DEV_IMAGE)) -e VALKEY_IMAGE $(K8S_TOOLS_IMAGE) sh -c ' \
+		-e KEYCLOAK_IMAGE_ID=$$(docker image inspect -f '{{.Id}}' $(KEYCLOAK_DEV_IMAGE)) -e VALKEY_IMAGE -e MAILPIT_IMAGE $(K8S_TOOLS_IMAGE) sh -c ' \
 		set -e; . /secrets/shop.env; \
 		hash() { printf "%s\n" "$$@" | sha256sum | cut -d" " -f1; }; \
 		SHOP_AUTH_HASH=$$(hash "$$SHOP_AUTH_CLIENT_SECRET"); VALKEY_AUTH_HASH=$$(hash "$$VALKEY_PASSWORD"); \
 		KEYCLOAK_TEST_USERS_HASH=$$(hash "$$SHOP_TEST_CUSTOMER_PASSWORD" "$$SHOP_TEST_ADMIN_PASSWORD"); \
+		SHOP_PAYMENT_HASH=$$(hash "$$SHOP_PAYMENT_WEBHOOK_SECRET"); \
 		for attempt in 1 2 3; do \
 			kubectl kustomize deploy/k8s/overlays/local \
 				| sed -e "s/api-image-id-placeholder/$$API_IMAGE_ID/" -e "s/web-image-id-placeholder/$$WEB_IMAGE_ID/" -e "s/keycloak-image-id-placeholder/$$KEYCLOAK_IMAGE_ID/" \
 				-e "s/shop-auth-hash-placeholder/$$SHOP_AUTH_HASH/" -e "s/valkey-auth-hash-placeholder/$$VALKEY_AUTH_HASH/" -e "s/keycloak-test-users-hash-placeholder/$$KEYCLOAK_TEST_USERS_HASH/" \
-				-e "s|valkey-image-placeholder|$$VALKEY_IMAGE|" \
+				-e "s/shop-payment-hash-placeholder/$$SHOP_PAYMENT_HASH/" \
+				-e "s|valkey-image-placeholder|$$VALKEY_IMAGE|" -e "s|mailpit-image-placeholder|$$MAILPIT_IMAGE|" \
 				| kubectl apply --server-side --field-manager=shop-deploy -f - && exit 0; \
 			echo "apply failed (attempt $$attempt of 3)" >&2; sleep 10; \
 		done; exit 1'
 	$(KUBECTL) wait --for=condition=Ready cluster.postgresql.cnpg.io/shop-db cluster.postgresql.cnpg.io/keycloak-db -n shop --timeout=300s
 	$(KUBECTL) -n shop rollout status deploy/valkey --timeout=300s
+	$(KUBECTL) -n shop rollout status deploy/mailpit --timeout=300s
 	$(KUBECTL) -n shop rollout status deploy/keycloak --timeout=420s
 	$(KUBECTL) -n shop rollout status deploy/api --timeout=300s
 	$(KUBECTL) -n shop rollout status deploy/web --timeout=300s
@@ -359,7 +365,7 @@ cluster-e2e: secrets e2e-deps k8s-tools cache-dirs ## Playwright and NetworkPoli
 	$(MAKE) --no-print-directory cluster-smoke || status=1; \
 	set -a; . $(SECRETS_FILE); set +a; \
 	docker run --rm --init --shm-size 1g --network kind --user $(HOST_UID):$(HOST_GID) -e HOME=/cache/home -e CI=true \
-		-e E2E_UPSTREAM=shop-control-plane:30080 -e E2E_IDP_UPSTREAM=shop-control-plane:30089 -e E2E_REPORT_DIR=/reports \
+		-e E2E_UPSTREAM=shop-control-plane:30080 -e E2E_IDP_UPSTREAM=shop-control-plane:30089 -e E2E_MAILPIT_URL=http://shop-control-plane:30025 -e E2E_REPORT_DIR=/reports \
 		-e SHOP_TEST_CUSTOMER_PASSWORD -e SHOP_TEST_ADMIN_PASSWORD \
 		-v $(CURDIR)/tests/e2e:/e2e:ro -v $(CACHE_DIR)/home:/cache/home -v $(CURDIR)/$(CLUSTER_REPORT_DIR):/reports -w /e2e \
 		$(PLAYWRIGHT_IMAGE) ./node_modules/.bin/playwright test $(E2E_ARGS) || status=1; \

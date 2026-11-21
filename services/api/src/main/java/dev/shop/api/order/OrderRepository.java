@@ -2,6 +2,7 @@ package dev.shop.api.order;
 
 import dev.shop.api.catalog.pricing.Money;
 import dev.shop.api.catalog.pricing.PricedProduct;
+import dev.shop.api.inventory.reservations.ReservationLine;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -19,12 +20,19 @@ import org.springframework.stereotype.Repository;
 @Repository
 class OrderRepository {
 
-    record OrderRow(UUID id, OrderStatus status, Instant createdAt, Instant expiresAt, Money total) {}
+    record OrderRow(
+            UUID id,
+            OrderStatus status,
+            Instant createdAt,
+            Instant expiresAt,
+            Money total,
+            OrderPaymentStatus paymentStatus,
+            boolean latePayment) {}
 
     record SummaryRow(OrderRow order, int itemCount) {}
 
     private static final String ORDER_COLUMNS =
-            "SELECT id, status, created_at, expires_at, total_minor, currency FROM orders";
+            "SELECT id, status, created_at, expires_at, total_minor, currency, payment_status, late_payment FROM orders";
 
     private final JdbcClient jdbc;
 
@@ -81,6 +89,58 @@ class OrderRepository {
                 .optional();
     }
 
+    /** For the payment module's webhook and listeners, which run without a customer. */
+    Optional<OrderRow> lockById(UUID id) {
+        return jdbc.sql(ORDER_COLUMNS + " WHERE id = :id FOR UPDATE")
+                .param("id", id)
+                .query(OrderRepository::mapOrder)
+                .optional();
+    }
+
+    List<ReservationLine> reservationLines(UUID orderId) {
+        return jdbc.sql("SELECT product_id, quantity FROM order_line WHERE order_id = :order ORDER BY line_no")
+                .param("order", orderId)
+                .query((rs, rowNum) -> new ReservationLine(rs.getLong("product_id"), rs.getInt("quantity")))
+                .list();
+    }
+
+    Optional<String> email(UUID orderId) {
+        return jdbc.sql("SELECT email FROM orders WHERE id = :id")
+                .param("id", orderId)
+                .query(String.class)
+                .optional();
+    }
+
+    void refreshEmail(UUID orderId, String email) {
+        jdbc.sql("UPDATE orders SET email = :email WHERE id = :id")
+                .param("id", orderId)
+                .param("email", email)
+                .update();
+    }
+
+    void setPaymentStatus(UUID orderId, OrderPaymentStatus status) {
+        jdbc.sql("UPDATE orders SET payment_status = :status WHERE id = :id")
+                .param("id", orderId)
+                .param("status", status.name())
+                .update();
+    }
+
+    void setSettledBy(UUID orderId, UUID paymentId, OrderPaymentStatus status) {
+        jdbc.sql("UPDATE orders SET paid_payment_id = :payment, payment_status = :status WHERE id = :id")
+                .param("id", orderId)
+                .param("payment", paymentId)
+                .param("status", status.name())
+                .update();
+    }
+
+    void markPaid(UUID orderId, OffsetDateTime paidAt, boolean late) {
+        jdbc.sql("UPDATE orders SET paid_at = :paidAt, late_payment = :late WHERE id = :id")
+                .param("id", orderId)
+                .param("paidAt", paidAt)
+                .param("late", late)
+                .update();
+    }
+
     List<OrderLine> lines(UUID orderId) {
         return jdbc.sql("""
                         SELECT product_slug, product_name, unit_price_minor, currency, quantity
@@ -103,7 +163,7 @@ class OrderRepository {
 
     List<SummaryRow> page(String subject, int limit, long offset) {
         return jdbc.sql("""
-                        SELECT id, status, created_at, expires_at, total_minor, currency,
+                        SELECT id, status, created_at, expires_at, total_minor, currency, payment_status, late_payment,
                                (SELECT coalesce(sum(quantity), 0)::int FROM order_line WHERE order_id = orders.id)
                                    AS item_count
                         FROM orders WHERE customer_subject = :subject
@@ -178,6 +238,10 @@ class OrderRepository {
                 OrderStatus.valueOf(rs.getString("status")),
                 rs.getObject("created_at", OffsetDateTime.class).toInstant(),
                 rs.getObject("expires_at", OffsetDateTime.class).toInstant(),
-                new Money(rs.getLong("total_minor"), rs.getString("currency")));
+                new Money(rs.getLong("total_minor"), rs.getString("currency")),
+                Optional.ofNullable(rs.getString("payment_status"))
+                        .map(OrderPaymentStatus::valueOf)
+                        .orElse(null),
+                rs.getBoolean("late_payment"));
     }
 }

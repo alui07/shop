@@ -27,6 +27,10 @@ public record Identity(
         return new Identity(newSubject, name, email, roles, sessionId, emailVerified);
     }
 
+    public Identity withEmail(String newEmail) {
+        return new Identity(subject, name, newEmail, roles, sessionId, emailVerified);
+    }
+
     public Identity withNewSessionId() {
         return new Identity(subject, name, email, roles, newSid(), emailVerified);
     }

@@ -58,7 +58,13 @@ class OpenApiContractIT {
             "Order",
             "OrderLine",
             "OrderSummary",
-            "OrderPage"
+            "OrderPage",
+            "PaymentStart",
+            "FakePspPayment",
+            "FakePspCompletion",
+            "WebhookEvent",
+            "WebhookEventData",
+            "WebhookAck"
         }) {
             JsonNode schema = schemas.get(name);
             assertThat(schema.get("required").valueStream().map(JsonNode::asString))

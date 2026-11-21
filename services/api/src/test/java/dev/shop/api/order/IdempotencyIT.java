@@ -209,7 +209,7 @@ class IdempotencyIT extends ShopIT {
             insertKey("old-" + i, now.minusHours(1));
         }
         insertKey("live", now.plusHours(1));
-        MaintenanceJob job = new MaintenanceJob(store, new CheckoutProperties(null, 3, 10, null, 50, 2), clock);
+        MaintenanceJob job = new MaintenanceJob(store, new CheckoutProperties(null, 3, 10, null, 50, 2, null), clock);
 
         assertThat(job.runOnce()).isEqualTo(5);
 

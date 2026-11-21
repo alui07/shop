@@ -29,7 +29,7 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
-  // The checkout spec buys as customer and admin and runs last. The write spec makes a product active for a moment, which would break the count-asserting public
+  // The checkout spec buys as customer and admin and the payment spec (customer, a new registered user) runs after it. The write spec makes a product active for a moment, which would break the count-asserting public
   // specs, so it runs alone after them; the setup deactivates leftovers of an earlier run first.
   projects: [
     {
@@ -40,7 +40,7 @@ export default defineConfig({
     {
       name: 'chromium',
       dependencies: ['admin-cleanup'],
-      testIgnore: /(admin-writes|checkout)\.spec\.ts/,
+      testIgnore: /(admin-writes|checkout|payment)\.spec\.ts/,
       use: { ...devices['Desktop Chrome'] },
     },
     {
@@ -53,6 +53,12 @@ export default defineConfig({
       name: 'checkout',
       dependencies: ['admin-writes'],
       testMatch: /checkout\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'payment',
+      dependencies: ['checkout'],
+      testMatch: /payment\.spec\.ts/,
       use: { ...devices['Desktop Chrome'] },
     },
   ],

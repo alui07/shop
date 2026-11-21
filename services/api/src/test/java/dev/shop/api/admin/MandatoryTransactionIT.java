@@ -10,6 +10,8 @@ import dev.shop.api.catalog.pricing.ProductPricing;
 import dev.shop.api.inventory.StockManagement;
 import dev.shop.api.inventory.reservations.ReservationLine;
 import dev.shop.api.inventory.reservations.StockReservations;
+import dev.shop.api.order.OrderPayments;
+import dev.shop.api.order.PaymentAmount;
 import dev.shop.api.support.IntegrationTest;
 import java.util.List;
 import java.util.UUID;
@@ -38,6 +40,9 @@ class MandatoryTransactionIT {
     @Autowired
     private CartCheckout carts;
 
+    @Autowired
+    private OrderPayments orderPayments;
+
     @Test
     void writesWithoutATransactionAreRefused() {
         assertThatThrownBy(() -> products.create(new NewProduct("s", "N", "D", 1, "c", true)))
@@ -56,9 +61,28 @@ class MandatoryTransactionIT {
         assertThatThrownBy(() -> reservations.release(order)).isInstanceOf(IllegalTransactionStateException.class);
         assertThatThrownBy(() -> reservations.releaseAll(List.of(order)))
                 .isInstanceOf(IllegalTransactionStateException.class);
+        assertThatThrownBy(() -> reservations.consume(order)).isInstanceOf(IllegalTransactionStateException.class);
+        assertThatThrownBy(() -> reservations.takeLate(order, List.of(new ReservationLine(1, 1))))
+                .isInstanceOf(IllegalTransactionStateException.class);
         assertThatThrownBy(() -> pricing.lockForCheckout(List.of(1L)))
                 .isInstanceOf(IllegalTransactionStateException.class);
         assertThatThrownBy(() -> carts.lockForCheckout("s")).isInstanceOf(IllegalTransactionStateException.class);
         assertThatThrownBy(() -> carts.clear(1)).isInstanceOf(IllegalTransactionStateException.class);
+    }
+
+    @Test
+    void theOrderPaymentsApiNeedsTheCallersTransaction() {
+        UUID order = UUID.randomUUID();
+        assertThatThrownBy(() -> orderPayments.payable("s", order, null))
+                .isInstanceOf(IllegalTransactionStateException.class);
+        assertThatThrownBy(() -> orderPayments.lock(order)).isInstanceOf(IllegalTransactionStateException.class);
+        assertThatThrownBy(() -> orderPayments.paymentCreated(order))
+                .isInstanceOf(IllegalTransactionStateException.class);
+        assertThatThrownBy(() -> orderPayments.paymentSucceeded(order, order, new PaymentAmount(1, "EUR")))
+                .isInstanceOf(IllegalTransactionStateException.class);
+        assertThatThrownBy(() -> orderPayments.paymentFailed(order, order))
+                .isInstanceOf(IllegalTransactionStateException.class);
+        assertThatThrownBy(() -> orderPayments.refunded(order, order, false))
+                .isInstanceOf(IllegalTransactionStateException.class);
     }
 }

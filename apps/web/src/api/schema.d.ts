@@ -132,6 +132,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/fake-psp/payments/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["read"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/fake-psp/payments/{token}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["complete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/me": {
         parameters: {
             query?: never;
@@ -190,6 +222,42 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["cancelOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orders/{id}/payment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["startPayment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/payments/webhook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Receive a payment provider event
+         * @description Authenticated by the HMAC signature only: no session, no CSRF token.
+         */
+        post: operations["receive"];
         delete?: never;
         options?: never;
         head?: never;
@@ -339,6 +407,27 @@ export interface components {
             /** Format: int64 */
             expectedTotalMinor: number;
         };
+        FakePspCompletion: {
+            /** @enum {string} */
+            outcome: "SUCCEEDED" | "DECLINED";
+        };
+        /** @description A payment on the fake provider's page */
+        FakePspPayment: {
+            /** Format: int64 */
+            amountMinor: number;
+            currency: string;
+            /**
+             * Format: date-time
+             * @description After this the page can no longer be completed
+             */
+            expiresAt: string;
+            /** Format: uuid */
+            merchantReference: string;
+            /** @description Relative URL of the order to return to, /orders/{id} */
+            returnUrl: string;
+            /** @enum {string} */
+            status: "PENDING" | "SUCCEEDED" | "DECLINED" | "REFUNDED";
+        };
         FieldChange: {
             field: string;
             from: string | null;
@@ -367,9 +456,16 @@ export interface components {
             expiresAt: string;
             /** Format: uuid */
             id: string;
+            /** @description True when the payment arrived after the hold had run out and the stock was still taken */
+            latePayment: boolean;
             lines: components["schemas"]["OrderLine"][];
+            /**
+             * @description The status of the latest payment; null before a payment was started
+             * @enum {string|null}
+             */
+            paymentStatus: "CREATED" | "SUCCEEDED" | "FAILED" | "REFUND_PENDING" | "REFUNDED" | null;
             /** @enum {string} */
-            status: "PENDING_PAYMENT" | "CANCELLED" | "EXPIRED";
+            status: "PENDING_PAYMENT" | "CANCELLED" | "EXPIRED" | "PAID" | "REFUND_PENDING" | "REFUNDED";
             total: components["schemas"]["Money"];
         };
         OrderLine: {
@@ -401,8 +497,16 @@ export interface components {
             /** Format: int32 */
             itemCount: number;
             /** @enum {string} */
-            status: "PENDING_PAYMENT" | "CANCELLED" | "EXPIRED";
+            status: "PENDING_PAYMENT" | "CANCELLED" | "EXPIRED" | "PAID" | "REFUND_PENDING" | "REFUNDED";
             total: components["schemas"]["Money"];
+        };
+        /** @description Where to send the customer to pay */
+        PaymentStart: {
+            /**
+             * @description Relative URL of the provider's payment page, /fake-psp/{token}
+             * @example /fake-psp/abc
+             */
+            redirectUrl: string;
         };
         ProblemDetail: {
             detail?: string;
@@ -471,6 +575,37 @@ export interface components {
             onHand: number;
             /** Format: int64 */
             version: number;
+        };
+        WebhookAck: {
+            received: boolean;
+        };
+        /** @description A provider event, signed with HMAC-SHA256 in the Shop-Signature header */
+        WebhookEvent: {
+            /**
+             * Format: int64
+             * @description Unix seconds; informational, the signature timestamp is authoritative
+             */
+            created: number;
+            data: components["schemas"]["WebhookEventData"];
+            /**
+             * @description Unique per event; a repeated id has no further effect
+             * @example evt_0b1c2d3e
+             */
+            id: string;
+            /** @enum {string} */
+            type: "payment.succeeded" | "payment.failed";
+        };
+        WebhookEventData: {
+            /** Format: int64 */
+            amountMinor: number;
+            currency: string;
+            /**
+             * Format: uuid
+             * @description The payment id the shop gave the provider when creating it
+             */
+            merchantReference: string;
+            /** @description The provider's id for the payment */
+            providerPaymentId: string;
         };
     };
     responses: never;
@@ -1367,6 +1502,171 @@ export interface operations {
             };
         };
     };
+    read: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FakePspPayment"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description No payment has this token (payment-not-found) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    complete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FakePspCompletion"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FakePspPayment"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description No payment has this token (payment-not-found) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Already completed, or the session has expired (payment-state) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     me: {
         parameters: {
             query?: never;
@@ -1634,6 +1934,190 @@ export interface operations {
             };
             /** @description Conflict: the order is not awaiting payment, or its hold had already run out (order-state) */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    startPayment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. An open payment session is returned again rather than a second one created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentStart"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Not Found, also for another customer's order */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Conflict: the order is not awaiting payment, or its hold has run out (order-state) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    receive: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description t=<unix seconds>,v1=<64 lowercase hex>; v1 = HMAC-SHA256(secret, t + "." + body) */
+                "Shop-Signature": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description OK, also for an event id seen before */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookAck"];
+                };
+            };
+            /** @description Malformed JSON or an unknown event type, after the signature was verified */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Signature missing, malformed, stale or wrong (webhook-signature) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description No payment matches the event; the provider is expected to retry (payment-not-found) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Body over 64 KiB (body-too-large) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Content-Type is not application/json (unsupported-media-type) */
+            415: {
                 headers: {
                     [name: string]: unknown;
                 };

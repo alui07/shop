@@ -1,6 +1,6 @@
 # shop
 
-Spring Boot API (`services/api`) and React web app (`apps/web`). Visitors can browse a seeded product catalog: search, filter by category, sort, page through results and open a product page. Users sign in through Keycloak; customers fill a cart, check out and cancel or watch their orders; admins manage products and stock and read an audit log. Every tool runs in a pinned container; `make` is the only entry point, locally and in CI.
+Spring Boot API (`services/api`) and React web app (`apps/web`). Visitors can browse a seeded product catalog: search, filter by category, sort, page through results and open a product page. Users sign in through Keycloak; customers register, fill a cart, check out, pay on a fake payment page and get a confirmation email; admins manage products and stock and read an audit log. Every tool runs in a pinned container; `make` is the only entry point, locally and in CI.
 
 ## Prerequisites
 
@@ -35,7 +35,11 @@ Use "Sign in" in the header. Keycloak shows its own login form on its own origin
 | `customer@example.test` | customer | `SHOP_TEST_CUSTOMER_PASSWORD` in `.cache/secrets/shop.env` |
 | `admin@example.test` | admin | `SHOP_TEST_ADMIN_PASSWORD` in the same file |
 
-`make secrets` generates `.cache/secrets/shop.env` (mode 600) for this checkout: client secret, Valkey and Keycloak database passwords, the Keycloak bootstrap admin password and the two test-user passwords. It is idempotent, adds missing keys and keeps existing ones, and the file is gitignored. Never commit it or paste its contents anywhere. The test users exist only in a local overlay file, never in the Keycloak image. Sessions last 30 minutes idle and 8 hours absolute.
+`make secrets` generates `.cache/secrets/shop.env` (mode 600) for this checkout: client secret, Valkey and Keycloak database passwords, the Keycloak bootstrap admin password, the two test-user passwords and the payment webhook secret (`SHOP_PAYMENT_WEBHOOK_SECRET`). On a checkout that existed before slice 4b, run `make secrets` once to add the new key; `make dev`, `make e2e` and `make deploy` also run it. It is idempotent, adds missing keys and keeps existing ones, and the file is gitignored. Never commit it or paste its contents anywhere. The test users exist only in a local overlay file, never in the Keycloak image. Sessions last 30 minutes idle and 8 hours absolute.
+
+### Register
+
+Anyone can register from the sign-in page (`Register`) with a username, an email address, a first and a last name. There is no password field on that form: Keycloak 26.8 hides it while email verification is on, so the new user gets an email, follows its link and sets the password there, and is then signed in. Until then the account cannot sign in. New accounts get the `customer` role. In `make dev` the email is in Mailpit (http://localhost:8025); in the cluster it is in Mailpit on http://localhost:8026. Order mail goes only to a verified address. Why: `docs/adr/0009-payments-webhook-and-outbox.md`.
 
 ## Run on Kubernetes (kind)
 
@@ -46,7 +50,7 @@ make kubectl ARGS="-n shop get pods"
 make cluster-down
 ```
 
-Open http://localhost:8088 for the seeded catalog; Keycloak is on http://localhost:8089. An existing cluster lacks the 8089 mapping: run `make cluster-down cluster-up` once. Keycloak imports its realm in an init container (about 90 s) and is ready 2 to 3 minutes after its pod starts, so the first `make deploy` takes a few minutes longer. Running `make deploy` again with nothing changed restarts no pods. The first run downloads about 1.5 GB of images. With everything running the cluster node uses about 3.5 GiB (was 2.5 before Keycloak, its database and Valkey; measured with `docker stats shop-control-plane --no-stream`). Keycloak alone needs 600 to 750 MB per instance; `make dev`, `make e2e` and the cluster together approach the 8 GB mark, so do not run all three at once. Why it is built this way: `docs/adr/0005-local-kubernetes-on-kind.md`.
+Open http://localhost:8088 for the seeded catalog; Keycloak is on http://localhost:8089 and Mailpit on http://localhost:8026. An existing cluster lacks the 8089 and 8026 mappings: run `make cluster-down cluster-up` once (the first recreate wipes the kind database; `make cluster-up` on an old cluster prints a warning when the Mailpit mapping is missing). Keycloak imports its realm in an init container (about 90 s) and is ready 2 to 3 minutes after its pod starts, so the first `make deploy` takes a few minutes longer. Running `make deploy` again with nothing changed restarts no pods. The first run downloads about 1.5 GB of images. With everything running the cluster node uses about 3.5 GiB (was 2.5 before Keycloak, its database and Valkey; measured with `docker stats shop-control-plane --no-stream`). Keycloak alone needs 600 to 750 MB per instance; `make dev`, `make e2e` and the cluster together approach the 8 GB mark, so do not run all three at once. Why it is built this way: `docs/adr/0005-local-kubernetes-on-kind.md`.
 
 ## What the app does
 
@@ -95,9 +99,24 @@ The contract is committed as `services/api/openapi/openapi.json`; the design is 
 
 ### Cart, checkout and orders
 
-A signed-in customer (role `customer`) sets product quantities in a cart stored in Postgres (`Add to cart` sets the line's quantity, it does not add to what is already there; on the cart page, changing the quantity or `Remove` greys out and ignores further input while a change is pending, and after `Remove` focus moves to the `Cart` heading). Checkout re-prices the cart under locks, reserves stock for 15 minutes and creates an order in `PENDING_PAYMENT`, shown as `Awaiting payment`. There is no payment yet: the customer can cancel (`Cancelled`) or the hold runs out and a background job releases the stock (`Expired`). Unsafe cart and order calls need the CSRF header like all others. Anonymous visitors see `Sign in to buy` on product pages.
+A signed-in customer (role `customer`) sets product quantities in a cart stored in Postgres (`Add to cart` sets the line's quantity, it does not add to what is already there; on the cart page, changing the quantity or `Remove` greys out and ignores further input while a change is pending, and after `Remove` focus moves to the `Cart` heading). Checkout re-prices the cart under locks, reserves stock for 15 minutes and creates an order in `PENDING_PAYMENT`, shown as `Awaiting payment`. The customer can pay (see below), cancel (`Cancelled`) or let the hold run out, after which a background job releases the stock (`Expired`). Unsafe cart and order calls need the CSRF header like all others. Anonymous visitors see `Sign in to buy` on product pages.
 
 Rules and settings (`shop.checkout.*`, defaults in `CheckoutProperties`): hold time `reservation-ttl` 15 minutes; at most 3 unpaid orders per customer (`max-pending-orders`); at most 10 of one product reserved across a customer's unpaid orders (`max-reserved-per-product`); idempotency keys live 24 hours (`idempotency-ttl`); the expiry job runs every 30 s in batches of 50 and an hourly job deletes expired keys. Conflicts are 409 problems with an `errors` array: `cart-changed`, `price-changed`, `out-of-stock`, `cart-full`, `too-many-pending-orders`, `reservation-limit`, `order-state`, `idempotency-in-progress`; a reused key with another body is 422 `idempotency-key-reused`. Customer request bodies on `/api/**` are capped at 16 KiB (413 `body-too-large`), and a body that is not `application/json` gets 415 `unsupported-media-type` before it is read; the cap applies to routes that read a body, so a body sent to cancel or `DELETE` of a cart line is discarded by Tomcat rather than refused. Bad parameter types give a fixed 400 message that names only the parameter. Design and lock order: `docs/adr/0008-checkout-and-stock-reservation.md`.
+
+### Payment and confirmation email
+
+`Pay now` on an order in `Awaiting payment` calls `POST /api/orders/{id}/payment` and goes to the provider's page. The only provider is a fake that lives inside the API (`shop.payment.provider=fake`, set in compose and in the local overlay; startup fails when it is unset; the API logs a warning that no money is taken). Its page is the web route `/fake-psp/<token>`: it shows the amount, the merchant reference and when the session ends, with `Pay` and `Decline`. `Pay` makes the fake send a signed webhook to the API's own `POST /api/payments/webhook` (header `Shop-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 over t.body>`, 300 s window, secret `SHOP_PAYMENT_WEBHOOK_SECRET`). The order page then shows `Payment is being confirmed.` for up to 20 s and turns to `Paid`. `Decline` leaves the order awaiting payment so the customer can try again. If the session has expired or the payment is already completed, the page says which (it refetches after a 409) and links back to the order. A payment that arrives after the hold ended is still taken when the stock is free and the order is within `shop.checkout.late-payment-window` (30 minutes; the order shows a late note); otherwise the order shows `Refund pending` and then `Refunded`. A second payment for a paid order and a payment with the wrong amount are refunded and leave the order unchanged; refunds go to the fake provider. A paid order triggers one confirmation email, sent by a listener on the Spring Modulith event registry; a failed send is retried by `EventRetryJob` with a growing backoff (1 minute up to 30). Mailpit shows the mail: http://localhost:8025 in `make dev`, http://localhost:8026 in kind, internal only in the e2e stack. Design, state table and failure handling: `docs/adr/0009-payments-webhook-and-outbox.md`.
+
+Failed events that stay failed for 48 attempts (about a day) move to `event_publication_dead_letter`. Resubmit one by hand with `psql` in the `shop` database (dev: `docker compose` Postgres on `localhost:5432`):
+
+```sql
+WITH back AS (DELETE FROM event_publication_dead_letter WHERE id = '<publication id>' RETURNING *)
+INSERT INTO event_publication (id, listener_id, event_type, serialized_event, publication_date, completion_date,
+                               status, completion_attempts, last_resubmission_date)
+SELECT id, listener_id, event_type, serialized_event, publication_date, completion_date, status, 0, NULL FROM back;
+```
+
+`EventRetryJob` picks the row up on its next run (every 60 s).
 
 ### Admin writes locally
 
@@ -150,6 +169,7 @@ services/api/               Spring Boot API
 services/api/openapi/       committed OpenAPI document (generated, see make generate)
 apps/web/                   React app
 deploy/k8s/                 Kustomize base and local overlay for the app
+deploy/k8s/overlays/local/  also Mailpit (`mailpit.yaml`) and its NetworkPolicies (`network-policies-mail.yaml`); never in `base`
 deploy/kind/                kind cluster config, Calico, Helm values, GatewayClass
 deploy/k8s-tools/           Dockerfile for the kind, Helm and kubectl tools image
 tests/e2e/                  Playwright project and its Compose stack
@@ -166,8 +186,8 @@ build/                      gitignored reports
 
 - `docs/plans/`: the master plan, the brief for each slice and `STATUS.md`. Start with `docs/plans/README.md` to see where the work stands and how to resume it.
 - `tests/`: every kind of test, what it proves and how to run it, how the end-to-end stack works and how to debug it (`tests/README.md`). Unit and integration tests live next to the code in each app.
-- `docs/adr/`: why the tooling, testing, catalog API, web security headers, local Kubernetes cluster, authentication, admin writes and checkout with stock reservation are set up this way.
-- `docs/threat-model.md`: assets, trust boundaries, threats and residual risks of sign-in, sessions, admin writes and checkout.
+- `docs/adr/`: why the tooling, testing, catalog API, web security headers, local Kubernetes cluster, authentication, admin writes, checkout with stock reservation, and payment with the webhook, outbox and registration are set up this way.
+- `docs/threat-model.md`: assets, trust boundaries, threats and residual risks of sign-in, sessions, admin writes, checkout, and payment with the webhook.
 
 ## Manual steps
 
@@ -179,11 +199,11 @@ Some things cannot be automated: first-time Docker group setup, checking the fir
 - GitHub code scanning (SARIF upload and the CodeQL workflow) needs a public repository or GitHub Advanced Security. The workflows check `github.event.repository.visibility == 'public'`: SARIF uploads and CodeQL are skipped on private repositories, and SARIF uploads are also skipped on fork pull requests.
 - CodeQL may warn about TypeScript 7 support.
 - Two TypeScript versions are installed in `apps/web` and in `tests/e2e`. `typescript-eslint` needs the TypeScript 6 JS API, so the `typescript` package is aliased to `@typescript/typescript6`; `tsc` (type check and build) comes from the `typescript7` alias, which is TypeScript 7. Drop the alias once `typescript-eslint` supports TypeScript 7.
-- The web runtime image runs `apk upgrade` because the pinned nginx base image lagged Alpine security fixes. Remove it when Renovate brings a base image that passes the scan without it.
+- The web and API runtime images run `apk upgrade` because their pinned base images (nginx, Temurin JRE) lagged Alpine security fixes. Remove each when Renovate brings a base image that passes the scan without it.
 - Catalog search matches whole words only: no prefixes and no typo tolerance (`docs/adr/0003-catalog-data-and-api.md`).
 - Products have no images yet; the web app shows a placeholder.
 - The Vite dev server does not enforce the Content Security Policy; only the built web image does (`docs/adr/0004-web-security-headers.md`).
-- Checkout (slice 4a) has no payment: an order ends only in `Cancelled` or `Expired`. The limits (3 unpaid orders, 10 of a product, 20 lines) are per account, there is no rate limit until slice 5, and cancel-and-reorder churn grows the order tables without retention (`docs/threat-model.md`, R37). Hot stock rows can answer 503 under heavy contention (R43). `available` on a cart line lets a customer learn exact free stock when it is 10 or less (R44). The expiry job is the only bulk path that returns stock from overdue orders and is not monitored until slice 5 (R50); an overdue order keeps its stock for up to 30 s after it stops counting toward the caps. `orders.email` stores the verified email at checkout as personal data (R45). A customer disabled in Keycloak can keep using cart and checkout for up to about 5 minutes (R42).
+- Payment (slice 4b) uses a fake provider inside the API: no money moves, the fake signs with the same key the API verifies with (`docs/threat-model.md`, R47), and rotating the webhook secret needs a deploy (R39). Mailpit is local only (never in `base`) and unauthenticated: anyone who can reach it reads every mailbox, including verification links (R38). The first `make cluster-down cluster-up` after 4b wipes the kind database. Registered users in kind are lost when Keycloak restarts. A crash between sending the confirmation and recording it can send the mail twice. Single API replica only (R14). The checkout limits (3 unpaid orders, 10 of a product, 20 lines) are per account, there is no rate limit until slice 5, and cancel-and-reorder churn grows the order tables without retention (`docs/threat-model.md`, R37). Hot stock rows can answer 503 under heavy contention (R43). `available` on a cart line lets a customer learn exact free stock when it is 10 or less (R44). The expiry job is the only bulk path that returns stock from overdue orders and is not monitored until slice 5 (R50); an overdue order keeps its stock for up to 30 s after it stops counting toward the caps. `orders.email` stores the verified email at checkout as personal data (R45). A customer disabled in Keycloak can keep using cart and checkout for up to about 5 minutes (R42).
 - Spring Security now sets the API's security headers; HSTS waits for the TLS-terminating Gateway. Keycloak runs with `sslRequired: external`, so it accepts plain http only from localhost and private addresses; the cloud setup uses `all`.
 - Cookies are not port-scoped: `__Host-SESSION` and `__Host-XSRF-TOKEN` from `localhost:8088` are also sent to Keycloak on `localhost:8089`, and the XSRF cookie is script-readable there. Separation needs distinct hostnames (`docs/threat-model.md`, R4).
 - No rate limiting until slice 5. Keycloak's brute-force protection sees only the gateway address, so anyone can lock out an account.

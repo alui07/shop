@@ -2,6 +2,7 @@ package dev.shop.api.auth;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
@@ -14,7 +15,9 @@ import org.springframework.validation.annotation.Validated;
 @Validated
 @ConfigurationProperties("shop.auth")
 public record ShopAuthProperties(
-        @NotBlank String publicOrigin,
+        @NotBlank @Pattern(regexp = "https?://[^/?#\\s]+", message = "must be an http(s) origin without a path")
+        String publicOrigin,
+
         @NotBlank String issuer,
         @NotBlank String internalRealmUrl,
         @NotBlank String clientId,

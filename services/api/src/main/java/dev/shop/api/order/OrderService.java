@@ -1,6 +1,5 @@
 package dev.shop.api.order;
 
-import dev.shop.api.inventory.reservations.StockReservations;
 import dev.shop.api.order.OrderRepository.OrderRow;
 import dev.shop.api.order.OrderRepository.SummaryRow;
 import java.time.Clock;
@@ -18,12 +17,12 @@ import org.springframework.transaction.annotation.Transactional;
 class OrderService {
 
     private final OrderRepository orders;
-    private final StockReservations reservations;
+    private final OrderTransitions transitions;
     private final Clock clock;
 
-    OrderService(OrderRepository orders, StockReservations reservations, Clock clock) {
+    OrderService(OrderRepository orders, OrderTransitions transitions, Clock clock) {
         this.orders = orders;
-        this.reservations = reservations;
+        this.transitions = transitions;
         this.clock = clock;
     }
 
@@ -53,9 +52,10 @@ class OrderService {
         OrderRow row = orders.lockOwned(id, subject).orElseThrow(OrderProblem::orderNotFound);
         boolean overdue = row.status().presentedAt(row.expiresAt(), clock.instant()) != row.status();
         OrderTrigger trigger = overdue ? OrderTrigger.EXPIRE : OrderTrigger.CANCEL;
-        OrderStatus next = OrderStateMachine.next(row.status(), trigger).orElseThrow(OrderProblem::orderState);
-        reservations.release(id);
-        orders.updateStatus(List.of(id), next);
+        OrderStatus next = transitions
+                .apply(row, trigger)
+                .orElseThrow(OrderProblem::orderState)
+                .next();
         if (overdue) {
             throw OrderProblem.orderState();
         }
@@ -70,7 +70,9 @@ class OrderService {
                 row.createdAt(),
                 row.expiresAt(),
                 orders.lines(row.id()),
-                row.total());
+                row.total(),
+                row.paymentStatus(),
+                row.latePayment());
     }
 
     private static OrderSummary summary(SummaryRow summary, Instant now) {

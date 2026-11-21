@@ -67,6 +67,11 @@ spec:
                 secretKeyRef:
                   name: shop-auth
                   key: SHOP_AUTH_CLIENT_SECRET
+            - name: SHOP_PAYMENT_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: shop-payment
+                  key: SHOP_PAYMENT_WEBHOOK_SECRET
             - name: JAVA_TOOL_OPTIONS
               value: -XX:MaxRAMPercentage=70 -XX:+ExitOnOutOfMemoryError
           resources:

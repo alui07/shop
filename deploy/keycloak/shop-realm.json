@@ -3,11 +3,11 @@
   "displayName": "Shop",
   "enabled": true,
   "sslRequired": "external",
-  "registrationAllowed": false,
+  "registrationAllowed": true,
   "registrationEmailAsUsername": false,
   "resetPasswordAllowed": false,
   "rememberMe": false,
-  "verifyEmail": false,
+  "verifyEmail": true,
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
   "editUsernameAllowed": false,
@@ -17,6 +17,27 @@
   "accessTokenLifespan": "${SHOP_ACCESS_TOKEN_LIFESPAN:300}",
   "revokeRefreshToken": true,
   "refreshTokenMaxReuse": 0,
+  "smtpServer": {
+    "host": "mailpit",
+    "port": "1025",
+    "from": "no-reply@shop.test",
+    "fromDisplayName": "Shop",
+    "auth": "false",
+    "ssl": "false",
+    "starttls": "false"
+  },
+  "components": {
+    "org.keycloak.userprofile.UserProfileProvider": [
+      {
+        "providerId": "declarative-user-profile",
+        "config": {
+          "kc.user.profile.config": [
+            "{\"attributes\": [{\"name\": \"username\", \"displayName\": \"${username}\", \"validations\": {\"length\": {\"min\": 3, \"max\": 255}, \"username-prohibited-characters\": {}, \"up-username-not-idn-homograph\": {}}, \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false}, {\"name\": \"email\", \"displayName\": \"${email}\", \"validations\": {\"email\": {}, \"length\": {\"max\": 255}}, \"required\": {\"roles\": [\"user\"]}, \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false}, {\"name\": \"firstName\", \"displayName\": \"${firstName}\", \"validations\": {\"length\": {\"max\": 100}, \"person-name-prohibited-characters\": {}}, \"required\": {\"roles\": [\"user\"]}, \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false}, {\"name\": \"lastName\", \"displayName\": \"${lastName}\", \"validations\": {\"length\": {\"max\": 100}, \"person-name-prohibited-characters\": {}}, \"required\": {\"roles\": [\"user\"]}, \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false}], \"groups\": []}"
+          ]
+        }
+      }
+    ]
+  },
   "defaultRole": {
     "name": "default-roles-shop",
     "description": "Default roles for the shop realm",
@@ -31,6 +52,12 @@
   "roles": {
     "realm": [
       { "name": "customer", "description": "A signed-in shopper" },
+      {
+        "name": "default-roles-shop",
+        "description": "Default roles for the shop realm",
+        "composite": true,
+        "composites": { "realm": ["customer"] }
+      },
       { "name": "admin", "description": "Manages products and stock" }
     ]
   },

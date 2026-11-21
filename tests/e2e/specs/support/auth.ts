@@ -28,11 +28,19 @@ export function signOutButton(page: Page) {
 }
 
 // Label-based locators keep this the only place that knows the Keycloak login form.
-export async function fillKeycloakForm(page: Page, role: Role): Promise<void> {
+export async function fillKeycloakCredentials(
+  page: Page,
+  email: string,
+  password: string,
+): Promise<void> {
   await expect(page).toHaveURL(new RegExp(`^${idpOrigin}/realms/shop/`));
-  await page.getByLabel(/email/i).fill(accounts[role].email);
-  await page.getByLabel('Password', { exact: true }).fill(passwordOf(role));
+  await page.getByLabel(/email/i).fill(email);
+  await page.getByLabel('Password', { exact: true }).fill(password);
   await page.getByRole('button', { name: 'Sign in' }).click();
+}
+
+export async function fillKeycloakForm(page: Page, role: Role): Promise<void> {
+  await fillKeycloakCredentials(page, accounts[role].email, passwordOf(role));
 }
 
 // Starts at the current page, signs in through the header link and returns once the app shows the signed-in header.

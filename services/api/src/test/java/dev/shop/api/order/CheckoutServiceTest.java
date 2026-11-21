@@ -28,7 +28,8 @@ class CheckoutServiceTest {
             mock(ProductPricing.class),
             mock(StockReservations.class),
             mock(OrderRepository.class),
-            new CheckoutProperties(Duration.ofMinutes(15), 3, 10, Duration.ofHours(24), 50, 1000),
+            new CheckoutProperties(
+                    Duration.ofMinutes(15), 3, 10, Duration.ofHours(24), 50, 1000, Duration.ofMinutes(30)),
             Clock.systemUTC());
 
     private void checkout() {

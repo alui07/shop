@@ -81,7 +81,7 @@ Where the code differs from the first design or the brief:
 - The pending-order and per-product caps are checked before the product lock; product slugs are looked up only when a cap refuses.
 - A `PUT` that repeats the current quantity does not bump the cart version.
 - `admin` allows `catalog::pricing` (for `Money`), which also exposes `ProductPricing.lockForCheckout` to it (see Named interfaces). The Java `OrderStatus` has the three 4a values; the database `CHECK` lists all six. There is no `consume` or `takeLate` on `StockReservations` yet (4b).
-- `OrderStateMachine` maps each (status, trigger) pair to a status; every transition that leaves `PENDING_PAYMENT` releases stock.
+- `OrderStateMachine` maps each (status, trigger) pair to a status; every transition that leaves `PENDING_PAYMENT` releases stock. ADR 0009 replaces this with a table whose rows carry a stock effect.
 - The request hash digest takes the algorithm as a parameter so the unreachable error branch can be tested.
 - Test-only code: `ReservationPeeker` (the deliberate violation for `ModuleRulesTest`), `Principals`, `Identity.emailVerified`, and `shop.jobs.enabled=false` in `@IntegrationTest`.
 - Web: an unpaid order past `expiresAt` is shown as `Expired` and `Cancel order` is hidden (a timer re-renders at expiry); the client keeps the checkout key on 5xx, network error and 413 and drops it on 201, `cart-changed`, `price-changed` and 422; it retries once after one second on `idempotency-in-progress` with the same key. The `Cart` link shows only for the `customer` role. The order view shows the snapshot unit price and line total.

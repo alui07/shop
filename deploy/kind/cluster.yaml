@@ -23,3 +23,8 @@ nodes:
         hostPort: 8089
         listenAddress: 127.0.0.1
         protocol: TCP
+      # Mailpit UI (overlays/local only)
+      - containerPort: 30025
+        hostPort: 8026
+        listenAddress: 127.0.0.1
+        protocol: TCP

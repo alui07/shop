@@ -43,6 +43,8 @@ class AuthorizationMatrixIT extends AuthIT {
                 Arguments.of("/api/orders?size=0", 401, 400, 400),
                 Arguments.of("/api/orders/" + UNKNOWN_ORDER, 401, 404, 404),
                 Arguments.of("/api/orders/not-a-uuid", 401, 400, 400),
+                Arguments.of("/api/fake-psp/payments/unknown-token", 401, 404, 404),
+                Arguments.of("/api/payments/webhook", 401, 403, 403),
                 Arguments.of("/api/unknown", 401, 403, 403),
                 Arguments.of("/actuator/health", 401, 403, 403),
                 Arguments.of("/v3/api-docs", 200, 200, 200),
@@ -65,6 +67,8 @@ class AuthorizationMatrixIT extends AuthIT {
                 Arguments.of("POST", "/api/checkout", 401, 400, 400),
                 Arguments.of("POST", "/api/orders", 401, 405, 405),
                 Arguments.of("POST", "/api/orders/" + UNKNOWN_ORDER + "/cancel", 401, 404, 404),
+                Arguments.of("POST", "/api/orders/" + UNKNOWN_ORDER + "/payment", 401, 404, 404),
+                Arguments.of("POST", "/api/fake-psp/payments/unknown-token/complete", 401, 400, 400),
                 Arguments.of("PUT", "/api/products/x", 401, 403, 403),
                 Arguments.of("DELETE", "/api/me", 401, 403, 403),
                 Arguments.of("POST", "/api/unknown", 401, 403, 403));
@@ -85,7 +89,10 @@ class AuthorizationMatrixIT extends AuthIT {
                 Arguments.of("GET", "/api/orders"),
                 Arguments.of("GET", "/api/cart"),
                 Arguments.of("DELETE", "/api/cart/lines/desk-lamp"),
-                Arguments.of("POST", "/api/orders/" + UNKNOWN_ORDER + "/cancel"));
+                Arguments.of("POST", "/api/orders/" + UNKNOWN_ORDER + "/cancel"),
+                Arguments.of("POST", "/api/orders/" + UNKNOWN_ORDER + "/payment"),
+                Arguments.of("GET", "/api/fake-psp/payments/unknown-token"),
+                Arguments.of("POST", "/api/fake-psp/payments/unknown-token/complete"));
     }
 
     @ParameterizedTest(name = "{0} {1} as a signed-in user without the customer role")

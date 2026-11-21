@@ -1,3 +1,4 @@
+import { signInLink } from './support/auth';
 import { expect, frontDoorOrigin, idpOrigin, issuer, test } from './support/test';
 
 const redirectUri = `${frontDoorOrigin}/login/oauth2/code/keycloak`;
@@ -122,12 +123,29 @@ test('the password grant (also on admin-cli), token exchange and device flow are
   expect(device.status()).toBeLessThan(500);
 });
 
-test('self-registration is off', async ({ idpRequest }) => {
+test('the sign-in page offers registration', async ({ page }) => {
+  await page.goto('/');
+  await signInLink(page).click();
+  await expect(page).toHaveURL(new RegExp(`^${idpOrigin}/realms/shop/`));
+  await expect(page.getByRole('link', { name: 'Register' })).toBeVisible();
+});
+
+test('there is no password reset link and the reset-credentials form is not served', async ({
+  idpRequest,
+  page,
+}) => {
+  await page.goto('/');
+  await signInLink(page).click();
+  await expect(page).toHaveURL(new RegExp(`^${idpOrigin}/realms/shop/`));
+  await expect(page.getByRole('link', { name: /forgot/i })).toHaveCount(0);
+  expect(await page.content()).not.toContain('reset-credentials');
+
   const response = await idpRequest.get(
-    '/realms/shop/protocol/openid-connect/registrations?client_id=shop-api&response_type=code&scope=openid&redirect_uri=' +
-      encodeURIComponent(redirectUri),
+    `/realms/shop/login-actions/reset-credentials?client_id=shop-api`,
     { maxRedirects: 0 },
   );
-
-  expect(response.status()).not.toBe(200);
+  const body = await response.text();
+  expect(response.status() === 404 || !body.includes('<form'), `status ${response.status()}`).toBe(
+    true,
+  );
 });

@@ -111,4 +111,68 @@ class StockReservationsIT extends ShopIT {
         assertThat(reserved(lampId)).isZero();
         assertStockInvariant();
     }
+
+    @Test
+    void consumingTakesTheHeldUnitsOutOfStockAndBumpsTheVersion() {
+        UUID order = insertPendingOrder(
+                "consumer", clock.instant().plus(Duration.ofMinutes(15)), new long[] {lampId, 2}, new long[] {
+                    notebookId, 3
+                });
+
+        inTransaction(() -> reservations.consume(order));
+
+        assertThat(onHandAndReserved(lampId)).isEqualTo("8:0:1");
+        assertThat(onHandAndReserved(notebookId)).isEqualTo("7:0:1");
+        assertThat(jdbc.sql("SELECT count(*) FROM reservation WHERE order_id = :id AND status = 'CONSUMED'")
+                        .param("id", order)
+                        .query(Integer.class)
+                        .single())
+                .isEqualTo(2);
+        assertStockInvariant();
+    }
+
+    @Test
+    void takingLateTakesEveryLineOrNothing() {
+        UUID order = insertOrderRow("late", clock.instant().minusSeconds(60));
+        jdbc.sql("UPDATE stock SET on_hand = 2 WHERE product_id = :id")
+                .param("id", notebookId)
+                .update();
+        List<ReservationLine> twoLamps = List.of(new ReservationLine(lampId, 1), new ReservationLine(lampId, 1));
+        List<ReservationLine> tooManyNotebooks =
+                List.of(new ReservationLine(lampId, 1), new ReservationLine(notebookId, 3));
+
+        boolean refused = inTransactionResult(() -> reservations.takeLate(order, tooManyNotebooks));
+        assertThat(refused).isFalse();
+        assertThat(onHandAndReserved(lampId)).isEqualTo("10:0:0");
+        assertThat(onHandAndReserved(notebookId)).isEqualTo("2:0:0");
+
+        boolean taken = inTransactionResult(() -> reservations.takeLate(order, twoLamps));
+        assertThat(taken).isTrue();
+        assertThat(onHandAndReserved(lampId)).isEqualTo("8:0:1");
+        assertThat(jdbc.sql("SELECT quantity FROM reservation WHERE order_id = :id AND status = 'CONSUMED'")
+                        .param("id", order)
+                        .query(Integer.class)
+                        .single())
+                .isEqualTo(2);
+        assertStockInvariant();
+    }
+
+    @Test
+    void takingLateRefusesAProductWithNoStockRow() {
+        UUID order = insertOrderRow("no-stock", clock.instant().minusSeconds(60));
+
+        assertThat(inTransactionResult(() -> reservations.takeLate(order, List.of(new ReservationLine(987654L, 1)))))
+                .isFalse();
+    }
+
+    private boolean inTransactionResult(java.util.function.Supplier<Boolean> work) {
+        return new TransactionTemplate(transactions).execute(status -> work.get());
+    }
+
+    private String onHandAndReserved(long productId) {
+        return jdbc.sql("SELECT on_hand, reserved, version FROM stock WHERE product_id = :id")
+                .param("id", productId)
+                .query((rs, row) -> rs.getInt("on_hand") + ":" + rs.getInt("reserved") + ":" + rs.getLong("version"))
+                .single();
+    }
 }

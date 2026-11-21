@@ -1,5 +1,5 @@
 #!/bin/sh
-# Proves the NetworkPolicies enforce: 6 connections must work, 16 must be dropped.
+# Proves the NetworkPolicies enforce: 8 connections must work, 19 must be dropped.
 # Run from the repo root in the k8s tools container (kubectl on PATH, KUBECONFIG set).
 set -u
 
@@ -54,6 +54,8 @@ check allow shop netpol-probe-api valkey 6379
 check allow shop netpol-probe-api keycloak 8080
 check allow shop netpol-probe-keycloak api 8080
 check allow shop netpol-probe-keycloak keycloak-db-rw 5432
+check allow shop netpol-probe-api mailpit 1025
+check allow shop netpol-probe-keycloak mailpit 1025
 check allow netpol-probe netpol-probe-outside kube-dns.kube-system 53
 
 check deny shop netpol-probe-web shop-db-rw 5432
@@ -72,9 +74,12 @@ check deny shop netpol-probe-api keycloak-db-rw 5432
 check deny shop netpol-probe-api keycloak 9000
 check deny netpol-probe netpol-probe-outside keycloak.shop 8080
 check deny netpol-probe netpol-probe-outside valkey.shop 6379
+check deny shop netpol-probe-web mailpit 1025
+check deny shop netpol-probe-api mailpit 8025
+check deny netpol-probe netpol-probe-outside mailpit.shop 1025
 
 if [ "$failures" -ne 0 ]; then
-  echo "$failures of 22 NetworkPolicy checks failed"
+  echo "$failures of 27 NetworkPolicy checks failed"
   exit 1
 fi
-echo "all 22 NetworkPolicy checks passed"
+echo "all 27 NetworkPolicy checks passed"

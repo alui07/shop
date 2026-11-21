@@ -56,7 +56,9 @@ class CsrfIT extends AuthIT {
                 Arguments.of("PUT", "/api/cart/lines/desk-lamp"),
                 Arguments.of("DELETE", "/api/cart/lines/desk-lamp"),
                 Arguments.of("POST", "/api/checkout"),
-                Arguments.of("POST", "/api/orders/7f0f2a4e-5c1b-4f55-9d0a-2b0a4f3c9e11/cancel"));
+                Arguments.of("POST", "/api/orders/7f0f2a4e-5c1b-4f55-9d0a-2b0a4f3c9e11/cancel"),
+                Arguments.of("POST", "/api/orders/7f0f2a4e-5c1b-4f55-9d0a-2b0a4f3c9e11/payment"),
+                Arguments.of("POST", "/api/fake-psp/payments/unknown-token/complete"));
     }
 
     @ParameterizedTest(name = "{0} {1} needs the CSRF token")
