@@ -161,5 +161,22 @@ services:
       api:
         condition: service_started
 
+  # Grafana, Prometheus, Tempo, Loki and a collector in one container; only with `make dev OBS=1` (profile obs). OTLP/HTTP on 4318 stays on the compose network.
+  otel-lgtm:
+    image: ${OTEL_LGTM_IMAGE:?set by make}
+    profiles: [obs]
+    environment:
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ../observability/dashboards:/otel-lgtm/shop-dashboards:ro
+      - ../observability/lgtm-dashboard-provider.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/shop.yaml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+
 volumes:
   postgres-data:

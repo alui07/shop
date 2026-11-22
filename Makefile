@@ -11,11 +11,13 @@ HOST_GID := $(shell id -g)
 CACHE_DIR := $(CURDIR)/.cache
 SECRETS_DIR := $(CACHE_DIR)/secrets
 SECRETS_FILE := $(SECRETS_DIR)/shop.env
-SECRET_KEYS := SHOP_AUTH_CLIENT_SECRET VALKEY_PASSWORD KEYCLOAK_DB_PASSWORD KC_BOOTSTRAP_ADMIN_PASSWORD SHOP_TEST_CUSTOMER_PASSWORD SHOP_TEST_ADMIN_PASSWORD SHOP_PAYMENT_WEBHOOK_SECRET
-COMPOSE := docker compose --env-file $(SECRETS_FILE) -f deploy/compose/compose.yaml
+SECRET_KEYS := SHOP_AUTH_CLIENT_SECRET VALKEY_PASSWORD KEYCLOAK_DB_PASSWORD KC_BOOTSTRAP_ADMIN_PASSWORD SHOP_TEST_CUSTOMER_PASSWORD SHOP_TEST_ADMIN_PASSWORD SHOP_PAYMENT_WEBHOOK_SECRET GRAFANA_ADMIN_PASSWORD
+COMPOSE = docker compose --env-file $(SECRETS_FILE) -f deploy/compose/compose.yaml $(COMPOSE_OBS_FILE)
 E2E_COMPOSE := docker compose --env-file $(SECRETS_FILE) -p shop-e2e -f tests/e2e/compose.yaml
 E2E_DOWN := $(E2E_COMPOSE) --profile runner down --volumes --remove-orphans
 E2E_ARGS ?=
+OVERLAY ?= local
+OBS ?=
 REPORT_DIR := build/reports/trivy
 IMAGE_DIR := build/images
 WEB_TOOLS_IMAGE := shop/web-tools:dev
@@ -31,6 +33,8 @@ CLUSTER_REPORT_DIR := build/reports/cluster-e2e
 KIND_LABEL := label=io.x-k8s.kind.cluster=$(CLUSTER_NAME)
 # kubeconform's Kubernetes version follows the kind node image: one source of truth.
 K8S_VERSION := $(shell echo '$(KIND_NODE_IMAGE)' | sed -E 's/^[^:]*:v([0-9.]+)@.*/\1/')
+# metrics-server's tag plus digest, passed to the chart as image.tag (the chart pins by tag only).
+METRICS_SERVER_IMAGE_TAG := $(patsubst registry.k8s.io/metrics-server/metrics-server:%,%,$(METRICS_SERVER_IMAGE))
 
 # Probed from inside a container, lazily, because the GID differs between Docker Desktop, WSL and CI runners.
 DOCKER_SOCK_GID = $(shell docker run --rm -v /var/run/docker.sock:/s $(ALPINE_IMAGE) stat -c %g /s)
@@ -44,7 +48,7 @@ MVN_IT_DOCKER = -v /var/run/docker.sock:/var/run/docker.sock --group-add $(or $(
 	--add-host=host.docker.internal:host-gateway -e TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal -e POSTGRES_IMAGE -e VALKEY_IMAGE -e MAILPIT_IMAGE
 
 export HOST_UID HOST_GID MAVEN_IMAGE POSTGRES_IMAGE VALKEY_IMAGE MAILPIT_IMAGE NGINX_IMAGE PLAYWRIGHT_IMAGE API_IMAGE WEB_IMAGE WEB_TOOLS_IMAGE MVN_ARGS \
-	KEYCLOAK_IMAGE KEYCLOAK_DEV_IMAGE \
+	KEYCLOAK_IMAGE KEYCLOAK_DEV_IMAGE OTEL_LGTM_IMAGE \
 	K8S_TOOLS_IMAGE KUBECTL_IMAGE KUBECONFORM_IMAGE GOLANG_IMAGE DOCKER_CLI_IMAGE KIND_NODE_IMAGE
 
 KUBECONFORM_ARGS = -strict -summary -kubernetes-version $(K8S_VERSION) -cache /cache \
@@ -63,9 +67,10 @@ KUBECTL = $(K8S_RUN) kubectl
 HELM = $(K8S_RUN) helm
 
 # Installs a Helm release unless the pinned chart version is deployed with the same values file (stamp under .cache/kind).
-# $(1) release, $(2) namespace, $(3) chart name and version as Helm lists it, $(4) chart reference and version flags, $(5) values file
+# $(1) release, $(2) namespace, $(3) chart name and version as Helm lists it, $(4) chart reference and version flags, $(5) values file,
+# $(6) optional pin that is also passed in $(4) (an image), recorded in the stamp so changing it reinstalls
 define helm_release
-stamp=$(KIND_DIR)/helm-$(1).stamp; want="$(3) $$(sha256sum $(5) | cut -d' ' -f1)"; \
+stamp=$(KIND_DIR)/helm-$(1).stamp; want="$(3) $$(sha256sum $(5) | cut -d' ' -f1)$(if $(6), $(6))"; \
 if [ "$$(cat $$stamp 2>/dev/null)" = "$$want" ] && $(HELM) list -n $(2) --deployed --filter '^$(1)$$' -o json | grep -qF '"chart":"$(3)"'; then \
 	echo "$(1): $(3) already deployed with unchanged values"; \
 else \
@@ -100,6 +105,8 @@ endef
 	e2e e2e-deps e2e-lint e2e-version-lock docker-lint workflow-lint compose-lint scan-fs scan-api scan-web \
 	k8s-tools k8s-lint cluster-up cluster-down cluster-smoke cluster-e2e cluster-diagnostics cluster-traffic deploy deploy-apply kubectl
 
+include make/obs.mk
+
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
@@ -125,14 +132,14 @@ secrets:
 keycloak-build: ## Build shop/keycloak:dev (optimised, realm baked in)
 	docker build --build-arg KEYCLOAK_IMAGE=$(KEYCLOAK_IMAGE) --provenance=false --sbom=false -t $(KEYCLOAK_DEV_IMAGE) deploy/keycloak
 
-dev: secrets keycloak-build web-tools web-deps ## Start Postgres, Valkey, Keycloak, Mailpit, API and web dev server (http://localhost:5173)
-	$(COMPOSE) up -d
+dev: secrets keycloak-build web-tools web-deps ## Start Postgres, Valkey, Keycloak, Mailpit, API and web dev server (http://localhost:5173); OBS=1 adds Grafana (http://localhost:3000)
+	$(OBS_COMPOSE_ENV) $(COMPOSE) up -d
 	@echo "web http://localhost:5173  keycloak http://localhost:8180  mailpit http://localhost:8025  postgres localhost:5432"
 	@echo "Test users customer@example.test and admin@example.test; passwords are SHOP_TEST_*_PASSWORD in $(SECRETS_FILE); Keycloak console user admin (KC_BOOTSTRAP_ADMIN_PASSWORD)"
 	@echo "The first API start downloads Maven dependencies; follow it with: make logs"
 
-down: secrets ## Stop the dev stack
-	$(COMPOSE) down --remove-orphans
+down: secrets ## Stop the dev stack, including the OBS=1 observability container
+	COMPOSE_PROFILES=obs $(COMPOSE) down --remove-orphans
 
 logs: secrets ## Follow dev stack logs
 	$(COMPOSE) logs -f --tail=100
@@ -167,7 +174,7 @@ fmt: web-deps e2e-deps ## Apply Spotless and Prettier formatting
 	$(E2E_RUN) pnpm run format
 
 clean: secrets ## Remove the dev stack, the kind cluster, build outputs and reports (keeps .cache)
-	$(COMPOSE) down --volumes --remove-orphans
+	COMPOSE_PROFILES=obs $(COMPOSE) down --volumes --remove-orphans
 	$(E2E_COMPOSE) --profile runner down --volumes --remove-orphans
 	$(MAKE) cluster-down
 	rm -rf build services/api/target apps/web/dist apps/web/node_modules apps/web/coverage tests/e2e/node_modules tests/e2e/reports
@@ -247,6 +254,8 @@ workflow-lint:
 
 compose-lint: secrets
 	$(COMPOSE) config -q
+	COMPOSE_PROFILES=obs $(COMPOSE) config -q
+	COMPOSE_PROFILES=obs $(COMPOSE) -f deploy/compose/compose.obs.yaml config -q
 	$(E2E_COMPOSE) --profile runner config -q
 
 scan-fs: cache-dirs
@@ -272,7 +281,7 @@ k8s-tools:
 		--build-arg KIND_VERSION=$(KIND_VERSION) --build-arg HELM_VERSION=$(HELM_VERSION) \
 		-t $(K8S_TOOLS_IMAGE) deploy/k8s-tools
 
-cluster-up: cache-dirs k8s-tools ## Create the kind cluster with Calico, Envoy Gateway and CloudNativePG (idempotent)
+cluster-up: cache-dirs k8s-tools ## Create the kind cluster with Calico, Envoy Gateway, CloudNativePG and metrics-server (idempotent)
 	@if [ -z "$$(docker ps -aq --filter $(KIND_LABEL))" ]; then \
 		$(KIND) create cluster --name $(CLUSTER_NAME) --config deploy/kind/cluster.yaml --image $(KIND_NODE_IMAGE) --kubeconfig /cache/kind/kubeconfig.external; \
 	elif [ -z "$$(docker ps -q --filter $(KIND_LABEL))" ]; then \
@@ -289,6 +298,8 @@ cluster-up: cache-dirs k8s-tools ## Create the kind cluster with Calico, Envoy G
 	$(KUBECTL) -n kube-system rollout status deploy/coredns --timeout=300s
 	@$(call helm_release,eg,envoy-gateway-system,gateway-helm-$(ENVOY_GATEWAY_CHART_VERSION),oci://docker.io/envoyproxy/gateway-helm --version $(ENVOY_GATEWAY_CHART_VERSION),deploy/kind/envoy-gateway-values.yaml)
 	@$(call helm_release,cnpg,cnpg-system,cloudnative-pg-$(CNPG_CHART_VERSION),cloudnative-pg --repo https://cloudnative-pg.github.io/charts --version $(CNPG_CHART_VERSION),deploy/kind/cnpg-values.yaml)
+	@$(call helm_release,metrics-server,kube-system,metrics-server-$(METRICS_SERVER_CHART_VERSION),metrics-server --repo https://kubernetes-sigs.github.io/metrics-server/ --version $(METRICS_SERVER_CHART_VERSION) --set image.tag=$(METRICS_SERVER_IMAGE_TAG),deploy/kind/metrics-server-values.yaml,$(METRICS_SERVER_IMAGE_TAG))
+	$(KUBECTL) wait --for=condition=Available apiservice/v1beta1.metrics.k8s.io --timeout=180s
 	$(KUBECTL) apply --server-side -f deploy/kind/gatewayclass.yaml
 	$(KUBECTL) wait --for=condition=Accepted gatewayclass/envoy-gateway --timeout=120s
 
@@ -296,7 +307,7 @@ cluster-down: ## Remove the kind cluster and its kubeconfig
 	@ids=$$(docker ps -aq --filter $(KIND_LABEL)); if [ -n "$$ids" ]; then docker rm -f -v $$ids; fi
 	rm -rf $(KIND_DIR)
 
-deploy: secrets build k8s-tools cache-dirs ## Load the :dev images into kind and apply the app (needs make cluster-up)
+deploy: secrets build k8s-tools cache-dirs ## Load the :dev images into kind and apply the app (needs make cluster-up); OVERLAY=obs exports telemetry
 	@if [ -z "$$(docker ps -q --filter $(KIND_LABEL))" ]; then echo "run make cluster-up first" >&2; exit 1; fi
 	@$(MAKE) --no-print-directory deploy-apply cluster-smoke || { $(MAKE) --no-print-directory cluster-diagnostics; exit 1; }
 	@echo "http://localhost:$(CLUSTER_PORT)"
@@ -315,7 +326,7 @@ endef
 
 # Namespace and Secrets go in before the workloads so no pod starts against an old Secret. Each Deployment carries a hash of only the Secrets it consumes
 # (values in a fixed order, never printed), so a changed secret rolls exactly its consumers. VALKEY_IMAGE and MAILPIT_IMAGE (versions.mk) are the only pins for those images.
-# Mailpit exists only in overlays/local, which is the only overlay deploy-apply renders.
+# Mailpit exists in overlays/local; overlays/obs builds on it. OVERLAY picks the overlay deploy-apply renders.
 # The image ID goes into a pod template annotation so a rebuilt :dev image rolls the pods exactly once and an unchanged one is a no-op.
 deploy-apply:
 	$(KIND) load docker-image --name $(CLUSTER_NAME) $(API_IMAGE) $(WEB_IMAGE) $(KEYCLOAK_DEV_IMAGE)
@@ -329,7 +340,7 @@ deploy-apply:
 		KEYCLOAK_TEST_USERS_HASH=$$(hash "$$SHOP_TEST_CUSTOMER_PASSWORD" "$$SHOP_TEST_ADMIN_PASSWORD"); \
 		SHOP_PAYMENT_HASH=$$(hash "$$SHOP_PAYMENT_WEBHOOK_SECRET"); \
 		for attempt in 1 2 3; do \
-			kubectl kustomize deploy/k8s/overlays/local \
+			kubectl kustomize deploy/k8s/overlays/$(OVERLAY) \
 				| sed -e "s/api-image-id-placeholder/$$API_IMAGE_ID/" -e "s/web-image-id-placeholder/$$WEB_IMAGE_ID/" -e "s/keycloak-image-id-placeholder/$$KEYCLOAK_IMAGE_ID/" \
 				-e "s/shop-auth-hash-placeholder/$$SHOP_AUTH_HASH/" -e "s/valkey-auth-hash-placeholder/$$VALKEY_AUTH_HASH/" -e "s/keycloak-test-users-hash-placeholder/$$KEYCLOAK_TEST_USERS_HASH/" \
 				-e "s/shop-payment-hash-placeholder/$$SHOP_PAYMENT_HASH/" \
@@ -337,12 +348,15 @@ deploy-apply:
 				| kubectl apply --server-side --field-manager=shop-deploy -f - && exit 0; \
 			echo "apply failed (attempt $$attempt of 3)" >&2; sleep 10; \
 		done; exit 1'
+	$(K8S_RUN) sh -c 'rendered=$$(kubectl kustomize deploy/k8s/overlays/$(OVERLAY)); for policy in $(OBS_ONLY_NETWORK_POLICIES); do \
+		printf "%s\n" "$$rendered" | grep -qx "  name: $$policy" || kubectl -n shop delete networkpolicy "$$policy" --ignore-not-found; done'
 	$(KUBECTL) wait --for=condition=Ready cluster.postgresql.cnpg.io/shop-db cluster.postgresql.cnpg.io/keycloak-db -n shop --timeout=300s
 	$(KUBECTL) -n shop rollout status deploy/valkey --timeout=300s
 	$(KUBECTL) -n shop rollout status deploy/mailpit --timeout=300s
 	$(KUBECTL) -n shop rollout status deploy/keycloak --timeout=420s
 	$(KUBECTL) -n shop rollout status deploy/api --timeout=300s
 	$(KUBECTL) -n shop rollout status deploy/web --timeout=300s
+	$(K8S_RUN) sh deploy/k8s-tools/wait-api-replicas.sh
 	$(KUBECTL) -n shop wait --for=condition=Programmed gateway/shop --timeout=180s
 
 # Plain bash /dev/tcp from the host (no curl there); HTTP/1.1 because Envoy rejects HTTP/1.0.
@@ -358,18 +372,24 @@ cluster-smoke:
 		echo "smoke ok: GET $$path"; \
 	done
 
-cluster-e2e: secrets e2e-deps k8s-tools cache-dirs ## Playwright and NetworkPolicy tests against the kind cluster (run make cluster-up deploy first)
+cluster-e2e: secrets e2e-deps k8s-tools cache-dirs ## Playwright, NetworkPolicy and PDB tests against the kind cluster, with an HPA replica report (run make cluster-up deploy first)
 	rm -rf $(CLUSTER_REPORT_DIR)
 	mkdir -p $(CLUSTER_REPORT_DIR)
 	@status=0; \
+	trap 'docker rm -f shop-hpa-sampler >/dev/null 2>&1 || true' EXIT; trap 'exit 130' INT TERM; \
 	$(MAKE) --no-print-directory cluster-smoke || status=1; \
 	set -a; . $(SECRETS_FILE); set +a; \
+	docker rm -f shop-hpa-sampler >/dev/null 2>&1 || true; \
+	$(K8S_DOCKER) -d --name shop-hpa-sampler $(K8S_TOOLS_IMAGE) sh deploy/k8s-tools/hpa-report.sh sample /reports/hpa-samples.csv >/dev/null; \
 	docker run --rm --init --shm-size 1g --network kind --user $(HOST_UID):$(HOST_GID) -e HOME=/cache/home -e CI=true \
 		-e E2E_UPSTREAM=shop-control-plane:30080 -e E2E_IDP_UPSTREAM=shop-control-plane:30089 -e E2E_MAILPIT_URL=http://shop-control-plane:30025 -e E2E_REPORT_DIR=/reports \
 		-e SHOP_TEST_CUSTOMER_PASSWORD -e SHOP_TEST_ADMIN_PASSWORD \
 		-v $(CURDIR)/tests/e2e:/e2e:ro -v $(CACHE_DIR)/home:/cache/home -v $(CURDIR)/$(CLUSTER_REPORT_DIR):/reports -w /e2e \
 		$(PLAYWRIGHT_IMAGE) ./node_modules/.bin/playwright test $(E2E_ARGS) || status=1; \
 	{ $(K8S_RUN) sh tests/e2e/cluster/network-policy-test.sh 2>&1 | tee $(CLUSTER_REPORT_DIR)/network-policy.log; } || status=1; \
+	docker rm -f shop-hpa-sampler >/dev/null 2>&1 || true; \
+	{ $(K8S_RUN) sh deploy/k8s-tools/hpa-report.sh summary /reports/hpa-samples.csv 2>&1 | tee $(CLUSTER_REPORT_DIR)/hpa.log; } || status=1; \
+	{ $(K8S_RUN) sh tests/e2e/cluster/pdb-test.sh 2>&1 | tee $(CLUSTER_REPORT_DIR)/pdb.log; } || status=1; \
 	if [ $$status -ne 0 ]; then $(MAKE) --no-print-directory cluster-diagnostics; fi; \
 	exit $$status
 
@@ -391,7 +411,9 @@ cluster-traffic: ## Request /api/status every 100 ms through the gateway and pri
 		done'
 
 k8s-lint: cache-dirs
-	docker run --rm --user $(HOST_UID):$(HOST_GID) -v $(CURDIR)/deploy:/deploy:ro $(KUBECTL_IMAGE) kustomize /deploy/k8s/overlays/local \
-		| docker run --rm -i --user $(HOST_UID):$(HOST_GID) -v $(CACHE_DIR)/kubeconform:/cache $(KUBECONFORM_IMAGE) $(KUBECONFORM_ARGS) -
+	for overlay in local obs; do \
+		docker run --rm --user $(HOST_UID):$(HOST_GID) -v $(CURDIR)/deploy:/deploy:ro $(KUBECTL_IMAGE) kustomize /deploy/k8s/overlays/$$overlay \
+			| docker run --rm -i --user $(HOST_UID):$(HOST_GID) -v $(CACHE_DIR)/kubeconform:/cache $(KUBECONFORM_IMAGE) $(KUBECONFORM_ARGS) - || exit 1; \
+	done
 	docker run --rm --user $(HOST_UID):$(HOST_GID) -v $(CACHE_DIR)/kubeconform:/cache -v $(CURDIR):/work:ro -w /work $(KUBECONFORM_IMAGE) \
-		$(KUBECONFORM_ARGS) deploy/kind/gatewayclass.yaml tests/e2e/cluster/network-policy-probes.yaml
+		$(KUBECONFORM_ARGS) deploy/kind/gatewayclass.yaml deploy/observability/grafana-route.yaml tests/e2e/cluster/network-policy-probes.yaml

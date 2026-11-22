@@ -1,0 +1,28 @@
+# The HPA owns the api Deployment's replica count, so the Deployment sets no `replicas` and `make deploy` never resets it.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api
+  labels:
+    app.kubernetes.io/name: api
+    app.kubernetes.io/part-of: shop
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api
+  minReplicas: 2
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+  behavior:
+    scaleUp:
+      # Ignores the JIT spike right after a pod turns ready; sustained load still scales within the window.
+      stabilizationWindowSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 120

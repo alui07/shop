@@ -12,7 +12,12 @@ spec:
       port: 80
       allowedRoutes:
         namespaces:
-          from: Same
+          from: Selector
+          selector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values: [shop, obs]
     - name: idp
       protocol: HTTP
       port: 8089

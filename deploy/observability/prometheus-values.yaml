@@ -1,0 +1,62 @@
+# Server only, with OTLP ingestion (the API pushes through the collector). No Alertmanager (alert rules arrive in slice 5c), no node exporter
+# (needs host access), no pushgateway, no kube-state-metrics (the replica panel reads target_info). The cAdvisor job stays for CPU throttling.
+alertmanager:
+  enabled: false
+kube-state-metrics:
+  enabled: false
+prometheus-node-exporter:
+  enabled: false
+prometheus-pushgateway:
+  enabled: false
+configmapReload:
+  prometheus:
+    resources:
+      requests:
+        cpu: 5m
+        memory: 16Mi
+      limits:
+        memory: 32Mi
+server:
+  retention: 6h
+  persistentVolume:
+    enabled: false
+  global:
+    scrape_interval: 15s
+  extraFlags:
+    - web.enable-lifecycle
+    - web.enable-otlp-receiver
+  # Keep in step with the otlp block of grafana/otel-lgtm's prometheus.yaml so the dashboard queries match in both stacks.
+  otlp:
+    keep_identifying_resource_attributes: true
+    promote_resource_attributes:
+      - service.instance.id
+      - service.name
+      - service.namespace
+      - service.version
+      - deployment.environment
+      - k8s.namespace.name
+      - k8s.node.name
+      - k8s.pod.name
+  resources:
+    requests:
+      cpu: 50m
+      memory: 192Mi
+    limits:
+      memory: 512Mi
+scrapeConfigs:
+  kubernetes-api-servers:
+    enabled: false
+  kubernetes-nodes:
+    enabled: false
+  kubernetes-service-endpoints:
+    enabled: false
+  kubernetes-service-endpoints-slow:
+    enabled: false
+  prometheus-pushgateway:
+    enabled: false
+  kubernetes-services:
+    enabled: false
+  kubernetes-pods:
+    enabled: false
+  kubernetes-pods-slow:
+    enabled: false

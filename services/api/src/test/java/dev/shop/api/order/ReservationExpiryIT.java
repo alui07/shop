@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.shop.api.support.AdminClient;
 import dev.shop.api.support.ShopIT;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.time.Duration;
@@ -27,6 +29,9 @@ class ReservationExpiryIT extends ShopIT {
     @Autowired
     private DataSource dataSource;
 
+    @Autowired
+    private MeterRegistry meters;
+
     @Test
     void anOverdueOrderIsExpiredAndItsStockGivenBackWhileALaterOneStays() {
         AdminClient client = customer("expiry-basic");
@@ -49,6 +54,24 @@ class ReservationExpiryIT extends ShopIT {
     }
 
     @Test
+    void theReleasedUnitsCounterAddsUpTheStockGivenBack() {
+        AdminClient client = customer("expiry-units");
+        placeOrderFor(client, LAMP, 3);
+        clock.advance(Duration.ofMinutes(16));
+        double before = releasedUnits();
+
+        job.runOnce();
+
+        assertThat(releasedUnits() - before).isEqualTo(3.0);
+        job.runOnce();
+        assertThat(releasedUnits() - before).isEqualTo(3.0);
+    }
+
+    private double releasedUnits() {
+        return meters.get("shop.reservations.released.units").counter().count();
+    }
+
+    @Test
     void twoJobsRunningTogetherReleaseEveryOrderExactlyOnce() throws Exception {
         jdbc.sql("UPDATE stock SET on_hand = 1000").update();
         for (int i = 0; i < 250; i++) {
@@ -56,7 +79,7 @@ class ReservationExpiryIT extends ShopIT {
                     "expiry-bulk", clock.instant().minusSeconds(60), new long[] {lampId, 1}, new long[] {notebookId, 2
                     });
         }
-        ReservationExpiryJob other = new ReservationExpiryJob(expiry, properties(50), clock);
+        ReservationExpiryJob other = new ReservationExpiryJob(expiry, properties(50), clock, new SimpleMeterRegistry());
 
         CompletableFuture<Integer> first = CompletableFuture.supplyAsync(job::runOnce);
         CompletableFuture<Integer> second = CompletableFuture.supplyAsync(other::runOnce);
@@ -102,7 +125,7 @@ class ReservationExpiryIT extends ShopIT {
         for (int i = 0; i < 5; i++) {
             ids.add(insertPendingOrder("expiry-batches", clock.instant().minusSeconds(60), new long[] {lampId, 1}));
         }
-        ReservationExpiryJob small = new ReservationExpiryJob(expiry, properties(2), clock);
+        ReservationExpiryJob small = new ReservationExpiryJob(expiry, properties(2), clock, new SimpleMeterRegistry());
 
         assertThat(small.runOnce()).isEqualTo(5);
 

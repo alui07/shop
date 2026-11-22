@@ -1,0 +1,12 @@
+# Added by `make dev OBS=1` only: switches the API's OTLP export on towards the otel-lgtm container (profile obs).
+services:
+  api:
+    environment:
+      MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED: "true"
+      MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED: "true"
+      MANAGEMENT_LOGGING_EXPORT_OTLP_ENABLED: "true"
+      MANAGEMENT_OTLP_METRICS_EXPORT_BASE_TIME_UNIT: seconds
+      MANAGEMENT_OTLP_METRICS_EXPORT_STEP: 10s
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4318
+      OTEL_SERVICE_NAME: shop-api
+      OTEL_RESOURCE_ATTRIBUTES: deployment.environment=compose,service.instance.id=api

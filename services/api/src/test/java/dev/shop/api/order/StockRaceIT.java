@@ -8,6 +8,7 @@ import dev.shop.api.support.CatalogFixtures;
 import dev.shop.api.support.Identity;
 import dev.shop.api.support.Principals;
 import dev.shop.api.support.ShopIT;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -133,8 +134,9 @@ class StockRaceIT extends ShopIT {
                     clock.instant().minusSeconds(60),
                     i % 2 == 0 ? new long[][] {lamp, notebook} : new long[][] {notebook, lamp});
         }
-        ReservationExpiryJob first = new ReservationExpiryJob(expiry, smallBatches(), clock);
-        ReservationExpiryJob second = new ReservationExpiryJob(expiry, smallBatches(), clock);
+        ReservationExpiryJob first = new ReservationExpiryJob(expiry, smallBatches(), clock, new SimpleMeterRegistry());
+        ReservationExpiryJob second =
+                new ReservationExpiryJob(expiry, smallBatches(), clock, new SimpleMeterRegistry());
         List<String> customers = seedCartsWithBothProducts(10);
 
         Outcomes outcomes = race(checkoutAsEach(customers), first::runOnce, second::runOnce);

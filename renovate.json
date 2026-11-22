@@ -14,6 +14,16 @@
       "groupName": "springdoc"
     },
     {
+      "description": "Bump by hand to the newest release whose POM declares the opentelemetry-api version Spring Boot manages (rule C7); a newer appender breaks linkage against Boot's older OpenTelemetry API",
+      "matchPackageNames": ["io.opentelemetry.instrumentation:opentelemetry-logback-appender-1.0"],
+      "enabled": false
+    },
+    {
+      "description": "The observability stack charts and images are checked together by make obs-up",
+      "matchPackageNames": ["prometheus", "grafana", "tempo", "loki", "opentelemetry-collector", "otel/opentelemetry-collector-k8s", "grafana/otel-lgtm"],
+      "groupName": "observability stack"
+    },
+    {
       "description": "TanStack Router packages must move together; declared after the non-major rule so this group wins",
       "matchPackageNames": ["@tanstack/react-router", "@tanstack/router-*"],
       "groupName": "tanstack router"
@@ -51,7 +61,7 @@
     },
     {
       "description": "Cluster-breaking updates stay out of the general non-major PR; the cluster-e2e job gates them.",
-      "matchPackageNames": ["sigs.k8s.io/kind", "helm.sh/helm/v4", "docker.io/envoyproxy/gateway-helm", "cloudnative-pg", "ghcr.io/cloudnative-pg/postgresql", "projectcalico/calico", "registry.k8s.io/kubectl", "ghcr.io/yannh/kubeconform", "quay.io/keycloak/keycloak"],
+      "matchPackageNames": ["sigs.k8s.io/kind", "helm.sh/helm/v4", "docker.io/envoyproxy/gateway-helm", "cloudnative-pg", "metrics-server", "registry.k8s.io/metrics-server/metrics-server", "ghcr.io/cloudnative-pg/postgresql", "projectcalico/calico", "registry.k8s.io/kubectl", "ghcr.io/yannh/kubeconform", "quay.io/keycloak/keycloak"],
       "groupName": "cluster platform"
     }
   ],

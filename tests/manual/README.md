@@ -174,6 +174,23 @@ Run these on `make dev` (http://localhost:5173, Mailpit on http://localhost:8025
   - Steps: with a screen reader on, use only the keyboard to start a payment from the order page, reach the provider page, tab to `Decline` and `Pay`, press `Pay`, and stay on the order page while it confirms. Repeat once with a session that has expired (use the shortened hold from the checkout section, wait for it to end plus the 5 minute grace, then press `Pay`).
   - Expected: focus order is logical and visible; the provider page's heading, amount and session end are announced; `Pay` and `Decline` are not skipped while a request is pending (they use `aria-disabled`, not `disabled`); `Payment is being confirmed.` is announced as a status without moving focus; the expired session shows `This payment has expired` as an alert and moves focus to it.
 
+## Observability (slice 5a)
+
+- [ ] **Follow a trace to its logs in Grafana, kind**
+  - Why manual: it checks the Grafana datasource links (Tempo to Loki and back), which no query tests.
+  - Steps: `make cluster-up deploy` if needed, then `make obs-up deploy OVERLAY=obs`. Open http://localhost:8088, browse the catalog and open one product. Open http://grafana.localhost:8088 and sign in as `admin` (anonymous Viewers cannot use Explore or the trace links); read the password without printing it, for example `grep ^GRAFANA_ADMIN_PASSWORD= .cache/secrets/shop.env | cut -d= -f2- | clip.exe` or open the file in an editor, never into shared logs. Go to Explore, choose the Tempo datasource and search for service `shop-api`. Open a `GET /api/products/{slug}` trace and use its logs link; then in Loki search `{service_name="shop-api"}`, open a line with a `trace_id` and follow its link back to the trace.
+  - Expected: the dashboard "Shop API" shows request rate, latency, Hikari and replica panels with 2 replicas; the trace opens with its spans, the logs link lands on the log lines of the same trace id, and the Loki line links back to the trace. Run `make obs-check` and expect no missing metric. Afterwards `make obs-down` and `make deploy` (the API logs export errors while `obs` is gone).
+
+- [ ] **Follow a trace to its logs in Grafana, compose**
+  - Why manual: same links, in the otel-lgtm stack.
+  - Steps: `make dev OBS=1`, wait for the API, browse http://localhost:5173, open http://localhost:3000, sign in as `admin` with otel-lgtm's built-in credentials (local only; Grafana asks for a new password at first login) and repeat the Explore steps above.
+  - Expected: the same dashboard (replica panel shows 1) and the same trace to logs and back navigation. `make obs-check-dev` passes. `make down` removes the `otel-lgtm` container.
+
+- [ ] **The payment token is not in the trace**
+  - Why manual: the automated test checks what the API sends, not what Tempo stores.
+  - Steps: with either stack exporting, pay an order on the fake provider page, then in Grafana search traces for `/api/fake-psp` and open the spans.
+  - Expected: the URL attribute reads `/api/fake-psp/payments/{token}`; the real token appears in no attribute.
+
 ## After the first push to GitHub
 
 - [ ] **Pull request workflow is green on a Linux runner**

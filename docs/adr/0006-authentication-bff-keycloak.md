@@ -47,7 +47,7 @@ Slice 3 adds sign-in, roles and an admin area. The SPA must never hold tokens, a
 - Role changes and disabled users take effect within the revalidation interval, not instantly (back-channel logout is instant when Keycloak delivers it).
 - Three stacks need three Keycloak configurations of the same issuer logic; `OidcLoginIT` and `keycloak.spec.ts` guard the consistency.
 - Footprint grows: Keycloak needs 600 to 750 MB per instance.
-- Local limits: `sslRequired: external`, no TLS or HSTS (cloud guide sets `all`), cookie separation only with distinct hostnames, no rate limiting until slice 5. See `docs/threat-model.md`.
+- Local limits: `sslRequired: external`, no TLS or HSTS (cloud guide sets `all`), cookie separation only with distinct hostnames, no rate limiting until slice 5c. See `docs/threat-model.md`.
 - Verified: `id_token_hint` with an expired token (compose e2e only; on kind revalidation refreshes the ID token before logout, so an expired hint is rare there and no manual check exists), the post-rotation id in the registry (`BackChannelLogoutIT`), the read-only-root Keycloak in kind (`cluster-e2e`).
 - Footprint measured: the kind node uses about 3.5 GiB with everything running (was 2.5). Keycloak in kind needs about 89 s for the realm import and is ready 2 to 3 minutes after its pod starts. An existing cluster needs `make cluster-down cluster-up` for the 8089 port mapping.
 - Valkey's image is pinned only in `deploy/versions.mk`. A secrets hash annotation restarts `api` and `keycloak` in kind when `.cache/secrets/shop.env` changes.

@@ -23,6 +23,7 @@ make down
 - Keycloak: http://localhost:8180 (realm `shop`; the admin console is available there with user `admin` and `KC_BOOTSTRAP_ADMIN_PASSWORD` from `.cache/secrets/shop.env`)
 - Mailpit UI: http://localhost:8025
 - Postgres: `localhost:5432`, database and user `shop`, password `dev-only-postgres-password` (local dev only)
+- With `make dev OBS=1` the stack also runs `grafana/otel-lgtm` and the API exports traces, metrics and logs to it: Grafana on http://localhost:3000 (anonymous Viewer; sign in as `admin`, otel-lgtm's built-in login, to use Explore; dashboard "Shop API"). `make obs-check-dev` checks that every dashboard metric arrived. `make down` removes the extra container. Without `OBS=1` nothing is exported.
 
 The web app shows an error until the API has finished starting. Keycloak imports the realm on every start, so sign-in works a minute or so after the stack is up. `make dev` runs the API with the Spring profiles `dev` and `seed`.
 
@@ -51,6 +52,21 @@ make cluster-down
 ```
 
 Open http://localhost:8088 for the seeded catalog; Keycloak is on http://localhost:8089 and Mailpit on http://localhost:8026. An existing cluster lacks the 8089 and 8026 mappings: run `make cluster-down cluster-up` once (the first recreate wipes the kind database; `make cluster-up` on an old cluster prints a warning when the Mailpit mapping is missing). Keycloak imports its realm in an init container (about 90 s) and is ready 2 to 3 minutes after its pod starts, so the first `make deploy` takes a few minutes longer. Running `make deploy` again with nothing changed restarts no pods. The first run downloads about 1.5 GB of images. With everything running the cluster node uses about 3.5 GiB (was 2.5 before Keycloak, its database and Valkey; measured with `docker stats shop-control-plane --no-stream`). Keycloak alone needs 600 to 750 MB per instance; `make dev`, `make e2e` and the cluster together approach the 8 GB mark, so do not run all three at once. Why it is built this way: `docs/adr/0005-local-kubernetes-on-kind.md`.
+
+Since slice 5a the API runs under a HorizontalPodAutoscaler (2 to 4 replicas, 60% CPU) and the web app runs 2 replicas; both have a PodDisruptionBudget (`maxUnavailable: 1`). `make cluster-up` installs metrics-server, so `make kubectl ARGS="-n shop top pods"` works; a new pod shows `<unknown>` CPU for about 45 s, which is normal. `make deploy` waits for two ready API pods. `make cluster-e2e` also writes an HPA replica summary (`build/reports/cluster-e2e/hpa.log`) and runs the PDB eviction check (`pdb.log`). The HPA owns `replicas`: if you switch this cluster back to a branch from before 5a, `make deploy` fails with a field conflict, so recreate it with `make cluster-down cluster-up deploy`.
+
+### Observability in kind
+
+```
+make obs-up                # Prometheus, Loki, Tempo, an OpenTelemetry Collector and Grafana in namespace obs
+make deploy OVERLAY=obs    # the app with OTLP export on (plain make deploy exports nothing)
+make obs-check             # every metric the dashboard uses is in Prometheus
+make obs-down
+```
+
+Grafana is at http://grafana.localhost:8088 (anonymous Viewer, who cannot use Explore; sign in as `admin` with `GRAFANA_ADMIN_PASSWORD` from `.cache/secrets/shop.env`; after changing it, `make obs-up` rolls the Grafana pod through a checksum annotation), through the same Gateway as the shop; `http://localhost:8088` still serves the shop. No new port mapping or cluster recreate is needed. `obs-up` fails if the memory requests in `obs` exceed 1 GiB (observed: 816 MiB requested; at idle Grafana uses about 330 MiB and the rest 30 to 120 MiB each). Run `make obs-down` when done; an API deployed with `OVERLAY=obs` logs export errors while `obs` is gone until you run `make deploy`, which also removes the obs-only NetworkPolicy. Design and numbers: `docs/adr/0010-observability.md`.
+
+Host facts for the numbers in these docs (2026-11-21): 15.6 GiB, 12 CPUs, cgroup v1, no `.wslconfig` (WSL's default of half the host memory applies). In kind the node used 3.7 GiB with two API pods before obs; in compose `otel-lgtm` used 1.07 GiB. CI is cgroup v2 and runs no obs stack.
 
 ## What the app does
 
@@ -136,16 +152,19 @@ Run `make help` for the list. `make ci` is exactly what the PR workflow runs: `l
 
 | Target | Purpose |
 |---|---|
-| `dev`, `down`, `logs` | Local stack |
+| `dev`, `down`, `logs` | Local stack; `make dev OBS=1` adds Grafana and OTLP export |
 | `api-stop`, `api-start` | Stop and start the API in the local stack, to see the unavailable state |
 | `lint` | Spotless, ESLint, `tsc`, Prettier (API, web and `tests/e2e`), `k8s-lint`, checks that the generated API client and route tree are up to date, Playwright version lock, hadolint, actionlint, zizmor, `compose config` |
 | `test` | `mvn verify` (unit and Testcontainers tests) and `vitest run --coverage`; both fail below 100% coverage |
 | `build` | Images `shop/api:dev` and `shop/web:dev` |
 | `e2e` | Playwright tests in Chromium against the built images behind a test-only gateway; reports in `build/reports/e2e`. Pass Playwright arguments with `E2E_ARGS`, e.g. `make e2e E2E_ARGS=specs/catalog.spec.ts` |
 | `cluster-up`, `cluster-down` | Create the kind cluster `shop` with its add-ons (idempotent), and remove it with its kubeconfig |
-| `deploy` | Build, load `shop/api:dev` and `shop/web:dev` into the cluster and apply `deploy/k8s/overlays/local` |
-| `cluster-e2e` | The Playwright suite against Envoy in the cluster, plus the NetworkPolicy test; reports in `build/reports/cluster-e2e`. `E2E_ARGS` works as for `e2e` |
+| `deploy` | Build, load `shop/api:dev` and `shop/web:dev` into the cluster and apply `deploy/k8s/overlays/local`; `OVERLAY=obs` also exports telemetry |
+| `cluster-e2e` | The Playwright suite against Envoy in the cluster, plus the NetworkPolicy test, the PDB eviction check and an HPA replica report; reports in `build/reports/cluster-e2e`. `E2E_ARGS` works as for `e2e` |
 | `cluster-smoke`, `cluster-diagnostics`, `cluster-traffic` | Check `127.0.0.1:8088`, collect pod state and logs, and send steady traffic (used to watch a rollout) |
+| `obs-up`, `obs-down` | Install or remove the observability stack in kind (needs `cluster-up`); Grafana at http://grafana.localhost:8088 |
+| `obs-check`, `obs-check-dev` | Fail when a metric the dashboard queries is missing in the kind Prometheus (after `make deploy OVERLAY=obs`) or in the compose `otel-lgtm` (after `make dev OBS=1`) |
+| `obs-memory` | Fail when the memory requests in `obs` exceed 1 GiB (run by `obs-up`) |
 | `kubectl` | Run kubectl in the tools container: `make kubectl ARGS="-n shop get pods"` |
 | `k8s-lint`, `k8s-tools` | Render and validate the manifests with kubeconform (part of `lint`); build the kind, Helm and kubectl tools image |
 | `generate` | Regenerate everything derived from code, in order: `api-spec`, `web-api-client`, then the route tree. Run it after changing the API contract or routes, and commit the results |
@@ -170,7 +189,10 @@ services/api/openapi/       committed OpenAPI document (generated, see make gene
 apps/web/                   React app
 deploy/k8s/                 Kustomize base and local overlay for the app
 deploy/k8s/overlays/local/  also Mailpit (`mailpit.yaml`) and its NetworkPolicies (`network-policies-mail.yaml`); never in `base`
-deploy/kind/                kind cluster config, Calico, Helm values, GatewayClass
+deploy/kind/                kind cluster config, Calico, Helm values (incl. metrics-server), GatewayClass
+deploy/observability/       Helm values for the obs stack, the Grafana route, the dashboard (`dashboards/shop-api.json`, shared by both stacks) and `check-metrics.sh`
+deploy/k8s/components/otel/ OTLP export environment and its NetworkPolicy; `overlays/obs` applies it
+make/obs.mk                 observability targets
 deploy/k8s-tools/           Dockerfile for the kind, Helm and kubectl tools image
 tests/e2e/                  Playwright project and its Compose stack
 tests/e2e/cluster/          NetworkPolicy test and its probe pods
@@ -186,8 +208,8 @@ build/                      gitignored reports
 
 - `docs/plans/`: the master plan, the brief for each slice and `STATUS.md`. Start with `docs/plans/README.md` to see where the work stands and how to resume it.
 - `tests/`: every kind of test, what it proves and how to run it, how the end-to-end stack works and how to debug it (`tests/README.md`). Unit and integration tests live next to the code in each app.
-- `docs/adr/`: why the tooling, testing, catalog API, web security headers, local Kubernetes cluster, authentication, admin writes, checkout with stock reservation, and payment with the webhook, outbox and registration are set up this way.
-- `docs/threat-model.md`: assets, trust boundaries, threats and residual risks of sign-in, sessions, admin writes, checkout, and payment with the webhook.
+- `docs/adr/`: why the tooling, testing, catalog API, web security headers, local Kubernetes cluster, authentication, admin writes, checkout with stock reservation, payment with the webhook, outbox and registration, and observability are set up this way.
+- `docs/threat-model.md`: assets, trust boundaries, threats and residual risks of sign-in, sessions, admin writes, checkout, payment with the webhook, and the observability stack.
 
 ## Manual steps
 
@@ -195,7 +217,7 @@ Some things cannot be automated: first-time Docker group setup, checking the fir
 
 ## Known limits
 
-- Kubernetes (kind): on a cgroup v1 Docker Desktop (this laptop's) the cluster sets `failCgroupV1: false` for kubelet 1.36, which is a stopgap; CI is cgroup v2. `make cluster-up` reapplies a Helm release only when its chart version or values change. No TLS or HSTS on localhost; one node and one Postgres instance, with data lost on `make cluster-down`; `make deploy` uses local `:dev` images (registry and digests come in slice 6); after a Docker Desktop restart the cluster may not recover, so run `make cluster-down cluster-up deploy`; port 8088 must be free; `make cluster-e2e` reaches the cluster through the node hostname with a browser host mapping, not through your host's localhost.
+- Kubernetes (kind): on a cgroup v1 Docker Desktop (this laptop's) the cluster sets `failCgroupV1: false` for kubelet 1.36, which is a stopgap; CI is cgroup v2. The HPA owns the API's `replicas`, so returning to a pre-5a branch needs `make cluster-down cluster-up deploy`. `make cluster-up` reapplies a Helm release only when its chart version or values change. No TLS or HSTS on localhost; one node and one Postgres instance, with data lost on `make cluster-down`; `make deploy` uses local `:dev` images (registry and digests come in slice 6); after a Docker Desktop restart the cluster may not recover, so run `make cluster-down cluster-up deploy`; port 8088 must be free; `make cluster-e2e` reaches the cluster through the node hostname with a browser host mapping, not through your host's localhost.
 - GitHub code scanning (SARIF upload and the CodeQL workflow) needs a public repository or GitHub Advanced Security. The workflows check `github.event.repository.visibility == 'public'`: SARIF uploads and CodeQL are skipped on private repositories, and SARIF uploads are also skipped on fork pull requests.
 - CodeQL may warn about TypeScript 7 support.
 - Two TypeScript versions are installed in `apps/web` and in `tests/e2e`. `typescript-eslint` needs the TypeScript 6 JS API, so the `typescript` package is aliased to `@typescript/typescript6`; `tsc` (type check and build) comes from the `typescript7` alias, which is TypeScript 7. Drop the alias once `typescript-eslint` supports TypeScript 7.
@@ -203,18 +225,19 @@ Some things cannot be automated: first-time Docker group setup, checking the fir
 - Catalog search matches whole words only: no prefixes and no typo tolerance (`docs/adr/0003-catalog-data-and-api.md`).
 - Products have no images yet; the web app shows a placeholder.
 - The Vite dev server does not enforce the Content Security Policy; only the built web image does (`docs/adr/0004-web-security-headers.md`).
-- Payment (slice 4b) uses a fake provider inside the API: no money moves, the fake signs with the same key the API verifies with (`docs/threat-model.md`, R47), and rotating the webhook secret needs a deploy (R39). Mailpit is local only (never in `base`) and unauthenticated: anyone who can reach it reads every mailbox, including verification links (R38). The first `make cluster-down cluster-up` after 4b wipes the kind database. Registered users in kind are lost when Keycloak restarts. A crash between sending the confirmation and recording it can send the mail twice. Single API replica only (R14). The checkout limits (3 unpaid orders, 10 of a product, 20 lines) are per account, there is no rate limit until slice 5, and cancel-and-reorder churn grows the order tables without retention (`docs/threat-model.md`, R37). Hot stock rows can answer 503 under heavy contention (R43). `available` on a cart line lets a customer learn exact free stock when it is 10 or less (R44). The expiry job is the only bulk path that returns stock from overdue orders and is not monitored until slice 5 (R50); an overdue order keeps its stock for up to 30 s after it stops counting toward the caps. `orders.email` stores the verified email at checkout as personal data (R45). A customer disabled in Keycloak can keep using cart and checkout for up to about 5 minutes (R42).
+- Payment (slice 4b) uses a fake provider inside the API: no money moves, the fake signs with the same key the API verifies with (`docs/threat-model.md`, R47), and rotating the webhook secret needs a deploy (R39). Mailpit is local only (never in `base`) and unauthenticated: anyone who can reach it reads every mailbox, including verification links (R38). The first `make cluster-down cluster-up` after 4b wipes the kind database. Registered users in kind are lost when Keycloak restarts. A crash between sending the confirmation and recording it can send the mail twice. Two to four API replicas since slice 5a (R14). The checkout limits (3 unpaid orders, 10 of a product, 20 lines) are per account, there is no rate limit until slice 5c, and cancel-and-reorder churn grows the order tables without retention (`docs/threat-model.md`, R37). Hot stock rows can answer 503 under heavy contention (R43). `available` on a cart line lets a customer learn exact free stock when it is 10 or less (R44). The expiry job is the only bulk path that returns stock from overdue orders and has dashboard panels but no alert until slice 5c (R50); an overdue order keeps its stock for up to 30 s after it stops counting toward the caps. `orders.email` stores the verified email at checkout as personal data (R45). A customer disabled in Keycloak can keep using cart and checkout for up to about 5 minutes (R42).
 - Spring Security now sets the API's security headers; HSTS waits for the TLS-terminating Gateway. Keycloak runs with `sslRequired: external`, so it accepts plain http only from localhost and private addresses; the cloud setup uses `all`.
 - Cookies are not port-scoped: `__Host-SESSION` and `__Host-XSRF-TOKEN` from `localhost:8088` are also sent to Keycloak on `localhost:8089`, and the XSRF cookie is script-readable there. Separation needs distinct hostnames (`docs/threat-model.md`, R4).
-- No rate limiting until slice 5. Keycloak's brute-force protection sees only the gateway address, so anyone can lock out an account.
+- No rate limiting until slice 5c. Keycloak's brute-force protection sees only the gateway address, so anyone can lock out an account.
 - Valkey keeps no data: a restart signs everyone out. Keycloak in kind re-creates the realm on every restart (new signing keys, SSO sessions lost); the Deployment uses `Recreate`. Compose Keycloak databases are tmpfs, so the realm is imported fresh on each start.
 - With Valkey down, the public catalog keeps working but a request carrying a session cookie gets 503. With Keycloak down, sign-in fails and signed-in sessions continue until the 15-minute revalidation grace ends. Role changes and disabled users take effect within about 5 minutes. A refused revalidation ends the session and clears its CSRF token; a refresh without an ID token counts as Keycloak being unavailable.
 - In kind, Valkey's image version is pinned only in `deploy/versions.mk`, and a secrets hash annotation restarts `api` and `keycloak` when `.cache/secrets/shop.env` changes.
-- The client IP from `X-Forwarded-For` is not trustworthy yet and nothing uses it; fix it before slice 5 (`docs/threat-model.md`, R20).
+- The client IP from `X-Forwarded-For` is not trustworthy yet and nothing uses it; fix it in slice 5c before rate limits use it (`docs/threat-model.md`, R20).
+- Observability (slice 5a): the `obs` namespace has no NetworkPolicies and Grafana allows anonymous Viewer on loopback (R55, R56); a client-supplied `traceparent` sets its request's trace id (R57); export failures only drop telemetry (R58). Gateway body limits, `statement_timeout` and Alertmanager rules move to slice 5c; gateway limits, rate limits and the `X-Forwarded-For` fix are listed above. Load tests and the catalog cache are slice 5b.
 - Keycloak's image scan fails only on fixable CRITICAL findings; HIGH is reported (gated in slice 6).
 - Until 2026-12-02 `scan-web` ignores 6 HIGH nginx 1.30.6 CVEs (HTTP/2, HTTP/3, TLS, mail, proxy with SSI or mirror; none reachable with `apps/web/nginx.conf`) in `apps/web/.trivyignore.yaml`, pending the nginx-unprivileged 1.30.7 image.
 - Playwright traces from failed e2e runs record typed test passwords (`tests/README.md`).
-- Admin writes: the slug cannot change after create; a product is hidden by clearing `Active`, never deleted. Admins set `onHand`; `reserved` belongs to checkout (slice 4a). There is no audit filter or export and no rate limit on writes until slice 5. The audit log is append-only by database triggers, but the database owner role can disable them (`docs/threat-model.md`, R21).
+- Admin writes: the slug cannot change after create; a product is hidden by clearing `Active`, never deleted. Admins set `onHand`; `reserved` belongs to checkout (slice 4a). There is no audit filter or export and no rate limit on writes until slice 5c. The audit log is append-only by database triggers, but the database owner role can disable them (`docs/threat-model.md`, R21).
 - A demoted admin can still write for up to 5 minutes while Keycloak is up. With Keycloak down, admin writes get 503 once the last success is older than 5 minutes, while reads continue to the 15-minute grace.
 - On dev and kind, changing the seed file re-activates a seed product an admin deactivated and overwrites an admin-created product with the same slug. Stock rows an admin edited are kept.
 - The first `make dev` is slow while Maven downloads dependencies into `.cache/m2`.
