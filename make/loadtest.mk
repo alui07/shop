@@ -71,7 +71,7 @@ if [ -n "$$route" ] || printf '%s\n' "$$nodeports" | grep -qx 30090; then echo "
 [ -z "$$failed" ] || exit 1
 endef
 
-.PHONY: loadtest loadtest-cache loadtest-lint k8s-loadtest-guard
+.PHONY: loadtest loadtest-cache loadtest-lint k8s-loadtest-guard k8s-rate-limit-guard
 
 # Every overlay not named loadtest* must render no loadtest configuration (make/forbid-loadtest-env.awk) and must keep the front door's /api/loadtest not-found rule.
 k8s-loadtest-guard:
@@ -80,6 +80,28 @@ k8s-loadtest-guard:
 		printf '%s\n' "$$out" | awk -f make/forbid-loadtest-env.awk || { echo "overlays/$$overlay renders loadtest configuration" >&2; exit 1; }; \
 		printf '%s\n' "$$out" | awk -f make/require-notfound-rule.awk || { echo "overlays/$$overlay lost the /api/loadtest not-found rule" >&2; exit 1; }; \
 	done
+
+# The guarded overlays keep both BackendTrafficPolicies and the ClientTrafficPolicy of base line for line (make/rate-limit-policies.awk) and carry no API rate-limit switch (make/forbid-rate-limit-switch.awk);
+# every loadtest* overlay raises each Envoy rule to at least RAISED_RATE_LIMIT_MIN. RATE_LIMIT_DEPLOY_DIR lets a test render a modified copy of deploy/.
+RAISED_RATE_LIMIT_MIN := 100000
+RATE_LIMIT_DEPLOY_DIR ?= deploy
+k8s-rate-limit-guard:
+	@render() { docker run --rm --user $(HOST_UID):$(HOST_GID) -v $(CURDIR)/$(RATE_LIMIT_DEPLOY_DIR):/deploy:ro $(KUBECTL_IMAGE) kustomize /deploy/k8s/$$1; }; \
+	base_render=$$(render base) || exit 1; \
+	base=$$(printf '%s\n' "$$base_render" | awk -f make/rate-limit-requests.awk); \
+	base_policies=$$(printf '%s\n' "$$base_render" | awk -f make/rate-limit-policies.awk); \
+	[ -n "$$base" ] || { echo "base renders no rate-limit rules" >&2; exit 1; }; \
+	for overlay in $(GUARDED_OVERLAYS); do \
+		out=$$(render overlays/$$overlay) || exit 1; \
+		[ "$$(printf '%s\n' "$$out" | awk -f make/rate-limit-policies.awk)" = "$$base_policies" ] || { echo "overlays/$$overlay changes a BackendTrafficPolicy or ClientTrafficPolicy of base" >&2; exit 1; }; \
+		printf '%s\n' "$$out" | awk -f make/forbid-rate-limit-switch.awk || { echo "overlays/$$overlay renders an API rate-limit setting" >&2; exit 1; }; \
+	done; \
+	for overlay in $(filter loadtest%,$(K8S_OVERLAYS)); do \
+		raised=$$(render overlays/$$overlay | awk -f make/rate-limit-requests.awk); \
+		[ "$$(printf '%s\n' "$$raised" | wc -l)" = "$$(printf '%s\n' "$$base" | wc -l)" ] || { echo "overlays/$$overlay renders a different number of rate-limit rules than base" >&2; exit 1; }; \
+		printf '%s\n' "$$raised" | awk -v min=$(RAISED_RATE_LIMIT_MIN) '$$2 < min { print "rate limit below " min ": " $$0 > "/dev/stderr"; bad = 1 } END { exit bad }' \
+			|| { echo "overlays/$$overlay leaves a rate limit unraised" >&2; exit 1; }; \
+	done; echo "rate-limit guard ok"
 
 loadtest-lint: ## k6 inspect on every scenario in loadtest/scenarios
 	@set -- loadtest/scenarios/*.js; [ -e "$$1" ] || { echo "no scenarios in loadtest/scenarios" >&2; exit 1; }; \

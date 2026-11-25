@@ -4,7 +4,7 @@ Status: accepted (slice 5a, 2026-11-21). Checked against the implemented code; t
 
 ## Context
 
-Slices 1 to 4 left the API with Micrometer and an OpenTelemetry starter whose three OTLP exports were switched off, ECS JSON logs on stdout and no place to look at any of it. Slice 5a adds export, a collector and backends in both stacks, one dashboard, and the metrics that ADR 0009 and the threat model (R50, R53) said were missing. It also installs metrics-server, an HPA and PodDisruptionBudgets (ADR 0005). Alert rules are not part of it: they move to slice 5c (D40).
+Slices 1 to 4 left the API with Micrometer and an OpenTelemetry starter whose three OTLP exports were switched off, ECS JSON logs on stdout and no place to look at any of it. Slice 5a adds export, a collector and backends in both stacks, one dashboard, and the metrics that ADR 0009 and the threat model (R50, R53) said were missing. It also installs metrics-server, an HPA and PodDisruptionBudgets (ADR 0005). Alert rules are not part of it: slice 5c adds them (below).
 
 ## Decisions
 
@@ -28,7 +28,7 @@ Slices 1 to 4 left the API with Micrometer and an OpenTelemetry starter whose th
 - kind: separate charts as the master plan says (D36), in namespace `obs`: OpenTelemetry Collector (the `otelcol-k8s` distribution, image pinned by digest, OTLP/HTTP in; traces to Tempo, logs to Loki's native `/otlp`, metrics to Prometheus's OTLP receiver), Prometheus (server only, `emptyDir`, 6 h retention, cAdvisor scrape kept for CPU throttling), Loki (single binary, filesystem), Tempo (single binary, local storage, 6 h retention) and Grafana. Chart versions are in `deploy/versions.mk`; Grafana and Tempo come from the `grafana-community` repository because the `grafana/grafana` and `grafana/tempo` charts are deprecated. `make obs-up` installs them with the idempotent Helm macro of ADR 0005; `make obs-down` removes them. The alternative, `otel-lgtm` in the cluster too, would use about half the memory but is not a production shape.
 - `make deploy OVERLAY=obs` applies the `obs` overlay (`local` plus the `otel` component: export variables, the downward-API pod name and the NetworkPolicy `api-to-otel-collector`, egress to the collector in `obs` on TCP 4318). `deploy` defaults to `OVERLAY=local`, which exports nothing.
 
-**Dashboard as code, shared by both stacks.** `deploy/observability/dashboards/shop-api.json` is the only dashboard file. Compose mounts it into `otel-lgtm`'s provisioning directory; `obs-up` creates the ConfigMap `shop-dashboards` from it and Grafana loads it through `dashboardsConfigMaps`, with no sidecar container (saves memory and an image). Panels: replicas (`count(last_over_time(target_info{job="shop-api"}[30s]))`, since OTLP ingestion never marks series of gone pods stale), request rate, 5xx ratio, p50, p95 and p99, Hikari active, idle, pending and max, executor active and queued, dead-letter rows, released units and expiry job runs, JVM heap, CPU, a logs panel and a trace search. There is no cache panel yet (the cache is slice 5b). The Prometheus datasource is chosen by type, so no UID is hard-coded.
+**Dashboard as code, shared by both stacks.** Two dashboard files live in `deploy/observability/dashboards/`: `shop-api.json` (the panels below) and `shop-limits.json` (slice 5c: alerts, rate limit rejections and limiter backend failures; split out to keep each file under 500 lines). Compose mounts the directory into `otel-lgtm`'s provisioning directory; `obs-up` creates the ConfigMap `shop-dashboards` from every file in it and Grafana loads it through `dashboardsConfigMaps`, with no sidecar container (saves memory and an image). Panels: replicas (`count(last_over_time(target_info{job="shop-api"}[30s]))`, since OTLP ingestion never marks series of gone pods stale), request rate, 5xx ratio, p50, p95 and p99, Hikari active, idle, pending and max, executor active and queued, dead-letter rows, released units and expiry job runs, JVM heap, CPU, a logs panel and a trace search. There is no cache panel yet (the cache is slice 5b). The Prometheus datasource is chosen by type, so no UID is hard-coded.
 
 **`check-metrics.sh` and `obs-check`.** `deploy/observability/check-metrics.sh` is the single list of metric names the dashboard queries and fails when one is missing, retrying up to 150 s for export steps and the first scheduled-task run. `make obs-check` runs it against the kind Prometheus through the API server's service proxy (it also requires `container_cpu_cfs_throttled_periods_total`); `make obs-check-dev` runs it against `otel-lgtm` on the compose network. OTLP-to-Prometheus name translation is the likely source of a mismatch, so this is the guard.
 
@@ -49,8 +49,34 @@ Slices 1 to 4 left the API with Micrometer and an OpenTelemetry starter whose th
 
 ## Consequences
 
-- One dashboard, one set of metric names and one export configuration serve compose and kind; a renamed metric fails `obs-check` instead of leaving an empty panel.
+- One set of dashboards, one set of metric names and one export configuration serve compose and kind; a renamed metric fails `obs-check` instead of leaving an empty panel.
 - Telemetry costs about 0.8 GiB of requests in kind and 1.1 GiB in compose, and only when asked for. Without `OVERLAY=obs` or `OBS=1` the API logs no export errors; with the `obs` overlay applied and `obs` uninstalled, it logs export failures until the stack returns or `make deploy` (local overlay, which removes the obs-only NetworkPolicy) restores `local` (the exporters drop data and retry; requests are unaffected).
 - A client-supplied `traceparent` sets the trace id of that request (R57), and `obs` has no NetworkPolicies and an anonymous Viewer (R55, R56): both are in the threat model.
 - Traces, metrics and logs of two API replicas are separate series by `service.instance.id`; the replica panel counts them.
-- Not verified here: that the token is absent from Tempo's stored spans (only the OTLP request body is asserted) and CI behaviour of metrics-server on cgroup v2. Alert rules and Alertmanager are slice 5c; load tests and the cache panel are slice 5b.
+- Not verified here: that the token is absent from Tempo's stored spans (only the OTLP request body is asserted) and CI behaviour of metrics-server on cgroup v2. Alertmanager is not installed (see the slice 5c section); load tests and the cache panel are slice 5b.
+
+## Slice 5c additions (alert rules)
+
+Status: accepted (slice 5c, 2026-11-25).
+
+**Rules live in one file, checked by `promtool`.** `deploy/observability/alerts/shop.rules.yaml` is a plain Prometheus rule file (group `shop`, evaluated every minute by the chart's default interval) and `shop.rules.test.yaml` holds the `promtool test rules` cases. `make prom-lint` runs `promtool check rules` and `promtool test rules` in the pinned `PROMETHEUS_IMAGE` (`prom/prometheus` v3.16.0, equal to the chart's app version; bump it together with `PROMETHEUS_CHART_VERSION`, Renovate groups it with the observability pins) and is part of `make lint`. `make obs-up` turns the rule file into `build/obs/prometheus-alerts-values.yaml` (`serverFiles: alerting_rules.yml:`) and passes it as a second `-f` to the Prometheus release, because the chart renders `serverFiles` values with `toYaml` and a file given with `--set-file` would arrive as one quoted string. The rule file's hash is in the Helm stamp, so a rule change re-applies, and the chart's config-reload sidecar reloads Prometheus.
+
+**Rules.** All select `job="shop-api"`.
+
+| Alert | Expression, for | Severity |
+|---|---|---|
+| `ShopEventsDeadLettered` (R53) | `max(shop_events_dead_letter_rows) > 0`, 5 m | warning |
+| `ShopReservationExpiryNotRunning` (R50) | no successful `ReservationExpiryJob.runOnce` in 5 m while `target_info` exists, 5 m | critical |
+| `ShopReservationExpiryFailing` (R50) | an `outcome!="SUCCESS"` run in 10 m, 10 m | warning |
+| `ShopReservationsOverdue` (R50) | `max(shop_reservations_overdue) > 0`, 5 m | critical |
+| `ShopRateLimitBackendFailing` (ADR 0013) | `increase(shop_rate_limit_backend_failures_total[5m]) > 0`, 5 m | warning |
+
+The scheduler timer shows that the job runs, not that it frees anything, so the API gained a gauge `shop.reservations.overdue` (`ReservationOverdueMetrics`): ACTIVE reservations whose order expired more than 2 minutes ago, about four job intervals. Like the dead-letter gauge it is cached for one export step (`StepCachedReading`) and is NaN when the database query fails, which never fires an alert. The limiter's counters (`shop.rate_limit.rejected{rule}`, `shop.rate_limit.backend.failures`) and the gauge are registered at startup with value 0, so the series exist before the first event.
+
+**Tests.** Each alert has a case that fires after its `for` and one that stays quiet below it; the gauge's NaN does not fire; the expiry rule fires on a missing series only while `target_info` exists; a counter restart (a pod restart) is handled by `increase`; an ERROR series that starts at its first non-zero value is covered, and the file documents that one isolated failure does not fire `ShopReservationExpiryFailing`. Passing `promtool` does not prove the label names exist after OTLP translation, so `check-metrics.sh` (`obs-check`) also asserts that each rule's selector, with its label matchers, returns at least one series in the live Prometheus.
+
+**Seeing an alert.** `make obs-alerts` prints the kind Prometheus alerts as `state name since`. The `shop-limits` dashboard has an Alerts panel (`ALERTS{alertstate=~"pending|firing"}`) plus panels for `shop_rate_limit_rejected_total` by rule and the backend failure rate. `tests/manual/README.md` has a check that inserts a dead-letter row, watches the alert go pending then firing, and deletes the row.
+
+**Alertmanager stays off, and how to add it.** Rules are evaluated and visible, but nothing is sent. In a cloud setup, enable the chart's Alertmanager (`alertmanager.enabled: true`) or an external one, point Prometheus `alerting.alertmanagers` at it, add a receiver per severity (critical pages, warning goes to a channel), and keep the rule file unchanged: it is the same file. The `description` annotations already carry the next step; the dead-letter one points at the README resubmission steps. compose's `otel-lgtm` has no rules.
+
+**Consequences.** A stalled or failing expiry job, a stuck reservation, a parked event and a failing limiter now show as alerts on the dashboard within minutes. Without a receiver nobody is told, so a missed look at Grafana is still a missed alert (R50, R53 residual). The rule names are `shop_*` as OTLP translation produces them; a renamed metric fails `obs-check`.

@@ -12,6 +12,7 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DataRetrievalFailureException;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -63,6 +64,32 @@ class ApiExceptionHandlerTest {
                 });
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+    }
+
+    @Test
+    void aStatementTimeoutIsA503WithRetryAfterWhetherTheSqlStateOrSpringsTypeSaysSo(CapturedOutput output) {
+        ResponseEntity<ProblemDetail> bySqlState = handler.handleDataAccess(new UncategorizedSQLException(
+                "select", "SELECT secret FROM product", new SQLException("canceling statement: secret text", "57014")));
+        ResponseEntity<ProblemDetail> byType = handler.handleDataAccess(
+                new QueryTimeoutException("slow SELECT secret", new java.sql.SQLTimeoutException("secret text")));
+
+        for (ResponseEntity<ProblemDetail> response : List.of(bySqlState, byType)) {
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+            assertThat(response.getHeaders().getFirst(HttpHeaders.RETRY_AFTER)).isEqualTo("5");
+            assertThat(response.getBody().getDetail()).isEqualTo("The request took too long; try again shortly");
+        }
+        assertThat(output.getAll()).contains("57014").doesNotContain("secret");
+    }
+
+    @Test
+    void aQueryTimeoutThatIsNotTheDatabasesStaysA500() {
+        ResponseEntity<ProblemDetail> redis =
+                handler.handleDataAccess(new QueryTimeoutException("Redis command timed out"));
+        ResponseEntity<ProblemDetail> otherState = handler.handleDataAccess(
+                new UncategorizedSQLException("select", "SELECT 1", new SQLException("x", "57P01")));
+
+        assertThat(redis.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        assertThat(otherState.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
     @Test

@@ -36,6 +36,8 @@ Transactions per request = (`xact_commit` in `db-after.txt` minus `xact_commit` 
 | `checkout` | Ramp 5 to 20 VUs over 3 m on the `lt-<RUN_ID>-1..5` products (1,000,000 units each). Add to cart, `POST /api/checkout` with a fresh `Idempotency-Key`, pay, complete on the fake PSP, poll until `PAID` (1 s, up to 20 s) | failed < 1%, checkout p95 < 1.5 s, `order_paid` > 98%, `time_to_paid` p95 < 10 s, checks > 99% |
 | `flash-sale` | 100 units of `flash-<RUN_ID>`. 150 authenticated VUs buy at once; then a 3 m hold: anonymous browse at `FLASH_HOLD_BROWSE_RATE` plus 10 authenticated checkout VUs (mostly 409 sold out); the hold scenarios start `FLASH_HOLD_START` (1 m) into the run, after the burst has sold out | `flash_orders_created` and `flash_orders_paid` <= 100, failed < 1% |
 
+Every load scenario (`browse`, `checkout`, `flash-sale`) also has the threshold `rate_limited count==0`. The counter (`lib/checks.js`, `rateLimitThreshold` and `countRateLimit`) goes up on any 429 from a shop request outside `setup()`, so a run fails if the rate limits were not raised. The `loadtest*` overlays raise them: the API takes `SHOP_RATE_LIMIT_SCALE` (1000 in the loadtest component) and the Envoy rules are patched to at least 100 000 per unit. All k6 traffic shares one source IP and VUs check out faster than a person, so production values would measure the limiter, not the app. Mint requests are outside this counter (the mint limiter has its own `Retry-After` handling).
+
 Each scenario writes `<scenario>-summary.json` and `<scenario>-summary.md` to `/reports`. Thresholds filter on the tag `load:shop`, which mint requests do not carry, so minting is outside latency and failure thresholds.
 
 ## Scripts

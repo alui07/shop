@@ -69,6 +69,9 @@ METRICS_SERVER_IMAGE := registry.k8s.io/metrics-server/metrics-server:v0.9.0@sha
 # Chart-bundled images (Prometheus, Grafana, Tempo, Loki) stay pinned by the chart's own tag; digests come with slice 6.
 # renovate: datasource=helm depName=prometheus registryUrl=https://prometheus-community.github.io/helm-charts
 PROMETHEUS_CHART_VERSION := 29.47.2
+# Provides promtool for make prom-lint. Same release as the chart's appVersion (chart 29.47.2 = v3.16.0); bump together with PROMETHEUS_CHART_VERSION.
+# renovate: datasource=docker depName=prom/prometheus
+PROMETHEUS_IMAGE := prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
 # renovate: datasource=helm depName=grafana registryUrl=https://grafana-community.github.io/helm-charts
 GRAFANA_CHART_VERSION := 14.4.1
 # renovate: datasource=helm depName=tempo registryUrl=https://grafana-community.github.io/helm-charts

@@ -1,0 +1,138 @@
+# Per-client-IP request limits and body caps in front of the API and Keycloak. Envoy counts per replica and resets on restart.
+# Path selectors are PathPrefix: Envoy's :path includes the query string, so Exact would miss ?x=1.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: shop
+  labels:
+    app.kubernetes.io/part-of: shop
+spec:
+  # An override replaces Envoy's own Retry-After, so the 429 overrides set a fixed 60 (the slowest rule's window); the second-window rules over-state the wait.
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: shop
+  rateLimit:
+    type: Local
+    local:
+      rules:
+        # Flood rule per API prefix; static web assets are not counted.
+        - clientSelectors:
+            - sourceCIDR: {type: Distinct, value: 0.0.0.0/0}
+              path: {type: PathPrefix, value: /api}
+          limit: {requests: 200, unit: Second}
+        - clientSelectors:
+            - sourceCIDR: {type: Distinct, value: 0.0.0.0/0}
+              path: {type: PathPrefix, value: /oauth2/}
+          limit: {requests: 200, unit: Second}
+        - clientSelectors:
+            - sourceCIDR: {type: Distinct, value: 0.0.0.0/0}
+              path: {type: PathPrefix, value: /login/oauth2/}
+          limit: {requests: 200, unit: Second}
+        - clientSelectors:
+            - sourceCIDR: {type: Distinct, value: 0.0.0.0/0}
+              path: {type: PathPrefix, value: /logout}
+          limit: {requests: 200, unit: Second}
+        # Login start for any method: HEAD and OPTIONS also create a pre-login session.
+        - clientSelectors:
+            - sourceCIDR: {type: Distinct, value: 0.0.0.0/0}
+              path: {type: PathPrefix, value: /oauth2/authorization/}
+          limit: {requests: 125, unit: Minute}
+        - clientSelectors:
+            - sourceCIDR: {type: Distinct, value: 0.0.0.0/0}
+              methods:
+                - value: POST
+              path: {type: PathPrefix, value: /api/checkout}
+          limit: {requests: 30, unit: Minute}
+        - clientSelectors:
+            - sourceCIDR: {type: Distinct, value: 0.0.0.0/0}
+              methods:
+                - value: POST
+              path: {type: PathPrefix, value: /api/payments/webhook}
+          limit: {requests: 20, unit: Second}
+  requestBuffer:
+    limit: 64Ki
+    mode: BufferAndLimit
+  responseOverride:
+    - match:
+        statusCodes:
+          - type: Value
+            value: 429
+      source: Local
+      response:
+        statusCode: 429
+        contentType: application/problem+json
+        header:
+          add:
+            - name: Retry-After
+              value: '60'
+        body:
+          type: Inline
+          inline: '{"type":"tag:shop.dev,2026:rate-limited","title":"Too Many Requests","status":429,"detail":"Too many requests; try again later","errors":[]}'
+    - match:
+        statusCodes:
+          - type: Value
+            value: 413
+      source: Local
+      response:
+        statusCode: 413
+        contentType: application/problem+json
+        body:
+          type: Inline
+          inline: '{"type":"tag:shop.dev,2026:body-too-large","title":"Content Too Large","status":413,"detail":"The request body is too large","errors":[]}'
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: keycloak
+  labels:
+    app.kubernetes.io/part-of: shop
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: keycloak
+  rateLimit:
+    type: Local
+    local:
+      rules:
+        - clientSelectors:
+            - sourceCIDR: {type: Distinct, value: 0.0.0.0/0}
+          limit: {requests: 150, unit: Second}
+        # Password guessing and registration spam; Keycloak pages are HTML, so the overrides are plain text.
+        - clientSelectors:
+            - sourceCIDR: {type: Distinct, value: 0.0.0.0/0}
+              methods:
+                - value: POST
+              path: {type: PathPrefix, value: /realms/shop/login-actions/}
+          limit: {requests: 125, unit: Minute}
+  requestBuffer:
+    limit: 64Ki
+    mode: BufferAndLimit
+  responseOverride:
+    - match:
+        statusCodes:
+          - type: Value
+            value: 429
+      source: Local
+      response:
+        statusCode: 429
+        contentType: text/plain
+        header:
+          add:
+            - name: Retry-After
+              value: '60'
+        body:
+          type: Inline
+          inline: Too many requests; try again later
+    - match:
+        statusCodes:
+          - type: Value
+            value: 413
+      source: Local
+      response:
+        statusCode: 413
+        contentType: text/plain
+        body:
+          type: Inline
+          inline: Request body too large

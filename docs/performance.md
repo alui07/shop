@@ -6,7 +6,7 @@ These are one-host numbers: a single kind node, the load generator and the obser
 
 ## What is and is not measured
 
-- **No rate limiting (D38).** Rate limits, gateway body limits and the Postgres `statement_timeout` are slice 5c. Every run here is without them, so a result describes the unprotected system. The only limiter is the per-pod mint limiter (10 a second), which applies to session minting only.
+- **No rate limiting (D38), for the slice 5b numbers.** Rate limits, gateway body limits and the Postgres `statement_timeout` arrived in slice 5c (ADR 0013). Every 5b run in the sections below was taken without them, so those results describe the unprotected system; the slice 5c section records a re-run with the limiter code in place. The only limiter is the per-pod mint limiter (10 a second), which applies to session minting only.
 - **No Keycloak on the load path.** k6 mints customer sessions under the `loadtest` profile (ADR 0011). The login flow and token refresh are not exercised; a minted session ends at its first revalidation (5 minutes), so k6 re-mints. Mint requests carry no `load:shop` tag and are outside every latency and failure threshold.
 - **Mail is real load (C25).** Minted users have a verified `@loadtest.invalid` address, so every paid order queues a confirmation mail through the outbox to Mailpit. The checkout and flash-sale numbers include that work.
 - **The cache is measured, not assumed.** `make loadtest-cache` compares cache off with cache on (ADR 0012). `make loadtest` runs with the cache on (the `loadtest` overlay).
@@ -145,6 +145,25 @@ Cache hit ratio (`cache.gets`) during the "on" runs: not read. Reading: the cach
 | `make cluster-e2e` after a load run | 102 passed, 1 skipped; NetworkPolicy 27/27; PDB eviction checks pass |
 | Seeded `stock` rows unchanged | not re-checked in these runs; checkout and flash sale use only their own `lt-` and `flash-` products |
 
+## Slice 5c: re-run with limits scaled (D44)
+
+Measured 2026-11-25, run `20261125-112840` (`build/reports/loadtest/20261125-112840/`), one `make loadtest` on the slice 5c tree before review fix round 3 (D52 Keycloak quick-login and D53 limiter backoff do not touch the measured paths), same host and settings as above. The 5b results above stay as measured, with their no-rate-limit framing.
+
+What changes in the run: the `loadtest` overlays set `SHOP_RATE_LIMIT_SCALE=1000` on the API (every per-account capacity times 1000) and raise every Envoy per-IP rule to 100 000 per unit, because all k6 traffic comes from one address and virtual users check out faster than a person. The limiter code still runs, so its Valkey round trip (a Bucket4j call per limited request, 500 ms timeout) and Envoy's per-request rate-limit check are in the numbers; the limits themselves are not exercised, and k6 fails the run on any 429 outside `setup()` (counter `rate_limited`). Also in the run and not in 5b: `statement_timeout=5s` on every connection and the Envoy request buffer (64 KiB, `BufferAndLimit`). `loadtest-cache` is not re-run: browse is anonymous GETs, which the API limiter does not touch. The production limit values are never measured under load (threat model R70).
+
+Compare against the 5b medians and judge a change only beyond the run-to-run spread seen in `r1-1` and `r1-2`.
+
+| Item | 5b (no limits) | 5c (limits scaled) |
+|---|---|---|
+| Flash sale: units sold / sold-out answers / `hpa-gate.sh` | 100 / about 1,520 / 3 of 3 PASS | 100 / 1,670 / 3 of 3 PASS (HPA 2 to 4); all six flash SQL checks PASS |
+| Flash sale: `http_req_failed{load:shop}` | 0 of about 49,000 | 0 of 49,456 |
+| Checkout p50 / p95 / p99 | 7.2 / 9.5 / 11.9 ms and 9.1 / 14.2 / 53.8 ms | 7.8 / 10.8 / 12.9 ms |
+| Checkout `order_paid` rate / failed requests | 100% / 0 | 100% (925 paid) / 0 |
+| Browse p95 (cache on) | see Browse, cache off and on (median 3.28 ms) | 2.3 ms (`load:shop`, 15,114 requests at 30 it/s) |
+| `rate_limited` count (must be 0) | not applicable | 0 in all three scenarios |
+| `shop_rate_limit_backend_failures_total` after the run (must be 0) | not applicable | 0 (Prometheus, max over the run on all 4 API pods); `shop_rate_limit_rejected_total` also 0 (`build/reports/slice-5c-integ-r3/prometheus-limiter-counters.json`; it is a transcription of the query responses read live after the run, not a raw save, because the kind node later restarted and Prometheus, with no persistent volume, lost the data) |
+| Moved beyond run-to-run spread? | not applicable | No: checkout sits between the two 5b runs, browse is lower than the 5b cache-on median, the flash sale behaves the same |
+
 ## Bottlenecks seen
 
 The first visible limit is checkout during the 150-VU burst: `op:checkout` p95 is about 1.0 s and p99 1.3 to 4.1 s, while all other requests in the same run stay at p95 under 8 ms and the checkout scenario alone runs at p95 under 15 ms. That fits serialisation on the one hot `stock` row; lock waits were not measured, so this is an inference. API CPU (219 to 234% of request) is what drives the HPA to 4 replicas; connections (40 of 100), Valkey and Postgres stayed far from their limits.
@@ -154,5 +173,5 @@ The first visible limit is checkout during the 150-VU burst: `op:checkout` p95 i
 - One host runs the node, the load generator's network path and the observability stack; the 12 CPUs are shared.
 - cgroup v1 locally: CPU accounting for the HPA differs from CI's cgroup v2 in detail.
 - The seeded catalog is about 60 products; plans and cache behaviour on a large catalog would differ.
-- No rate limits (D38) and no Keycloak on the path; real traffic has both.
+- No Keycloak on the path, and the 5b numbers have no rate limits (slice 5c section); real traffic has both.
 - Sampling at 0.1 hides most traces during runs.

@@ -3,7 +3,7 @@ import { sleep } from 'k6';
 import { Counter, Rate, Trend } from 'k6/metrics';
 import { BASE_URL, PAID_POLL_INTERVAL_S, PAID_POLL_LIMIT } from './config.js';
 import { authHeaders } from './session.js';
-import { jsonBody, problemType, statusIs } from './checks.js';
+import { countRateLimit, jsonBody, problemType, statusIs } from './checks.js';
 
 export const timeToPaid = new Trend('time_to_paid', true);
 export const orderPaid = new Rate('order_paid');
@@ -27,7 +27,7 @@ function tags(op, load) {
 }
 
 function get(path, op, load, headers = {}) {
-    return http.get(`${BASE_URL}${path}`, { headers, tags: tags(op, load), responseCallback: SUCCESS });
+    return countRateLimit(http.get(`${BASE_URL}${path}`, { headers, tags: tags(op, load), responseCallback: SUCCESS }), load);
 }
 
 export function uuid() {
@@ -78,11 +78,13 @@ export function discoverCatalog() {
 }
 
 export function putCartLine(session, slug, quantity) {
-    return http.put(`${BASE_URL}/api/cart/lines/${slug}`, JSON.stringify({ quantity }), {
-        headers: authHeaders(session, { 'Content-Type': 'application/json' }),
-        tags: tags('PUT /api/cart/lines/{slug}', 'shop'),
-        responseCallback: SUCCESS,
-    });
+    return countRateLimit(
+        http.put(`${BASE_URL}/api/cart/lines/${slug}`, JSON.stringify({ quantity }), {
+            headers: authHeaders(session, { 'Content-Type': 'application/json' }),
+            tags: tags('PUT /api/cart/lines/{slug}', 'shop'),
+            responseCallback: SUCCESS,
+        }),
+    );
 }
 
 /** Places an order for the current cart; `allowConflict` makes 409 an expected status (flash sale). */
@@ -97,7 +99,7 @@ export function checkout(session, cart, allowConflict) {
         },
     );
     checkoutDuration.add(res.timings.duration);
-    return res;
+    return countRateLimit(res);
 }
 
 export function classifyConflict(res) {
@@ -109,11 +111,13 @@ export function classifyConflict(res) {
 }
 
 function post(session, path, op, body) {
-    return http.post(`${BASE_URL}${path}`, body === undefined ? null : JSON.stringify(body), {
-        headers: authHeaders(session, body === undefined ? {} : { 'Content-Type': 'application/json' }),
-        tags: tags(op, 'shop'),
-        responseCallback: SUCCESS,
-    });
+    return countRateLimit(
+        http.post(`${BASE_URL}${path}`, body === undefined ? null : JSON.stringify(body), {
+            headers: authHeaders(session, body === undefined ? {} : { 'Content-Type': 'application/json' }),
+            tags: tags(op, 'shop'),
+            responseCallback: SUCCESS,
+        }),
+    );
 }
 
 /** Starts the payment, completes it on the fake provider's API and returns once the order is PAID or the wait ran out. */

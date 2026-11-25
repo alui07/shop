@@ -153,8 +153,13 @@ class AuthorizationMatrixIT extends AuthIT {
         HttpResponse<String> anonymous = postWithToken(browser(), megabyte);
         HttpResponse<String> customer = postWithToken(signedInAs(Identity.customer()), megabyte);
 
-        assertProblem(anonymous, 401, "Unauthorized", "Authentication required");
-        assertProblem(customer, 403, "Forbidden", "Access is denied");
+        for (HttpResponse<String> response : java.util.List.of(anonymous, customer)) {
+            assertThat(response.statusCode()).isEqualTo(413);
+            assertThat(response.headers().firstValue("Content-Type").orElseThrow())
+                    .startsWith("application/problem+json");
+            assertThat(JSON.readTree(response.body()).get("type").asString())
+                    .isEqualTo("tag:shop.dev,2026:body-too-large");
+        }
     }
 
     private static HttpResponse<String> postWithToken(TestBrowser browser, String body) {

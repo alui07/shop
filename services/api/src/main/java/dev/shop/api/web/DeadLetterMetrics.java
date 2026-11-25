@@ -5,7 +5,6 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.binder.MeterBinder;
 import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -22,31 +21,18 @@ class DeadLetterMetrics implements MeterBinder {
     static final String GAUGE_NAME = "shop.events.dead_letter.rows";
 
     private final JdbcClient jdbc;
-    private final Clock clock;
-    private final Duration step;
-    private Instant readAt;
-    private double rows;
+    private final StepCachedReading rows;
 
     DeadLetterMetrics(JdbcClient jdbc, Clock clock, @Value("${management.otlp.metrics.export.step:1m}") Duration step) {
         this.jdbc = jdbc;
-        this.clock = clock;
-        this.step = step;
+        this.rows = new StepCachedReading(clock, step, this::readRows);
     }
 
     @Override
     public void bindTo(MeterRegistry registry) {
-        Gauge.builder(GAUGE_NAME, this::rowCount)
+        Gauge.builder(GAUGE_NAME, rows::value)
                 .description("Event publications parked after giving up; they need a person")
                 .register(registry);
-    }
-
-    private synchronized double rowCount() {
-        Instant now = clock.instant();
-        if (readAt == null || !readAt.plus(step).isAfter(now)) {
-            rows = readRows();
-            readAt = now;
-        }
-        return rows;
     }
 
     private double readRows() {

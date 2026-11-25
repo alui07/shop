@@ -25,6 +25,7 @@ import org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepo
 import org.springframework.security.oauth2.jwt.JwtDecoderFactory;
 import org.springframework.security.web.DefaultRedirectStrategy;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.authentication.logout.LogoutHandler;
 import org.springframework.security.web.context.SecurityContextHolderFilter;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
@@ -50,6 +51,8 @@ class SecurityConfiguration {
             OidcSessionRegistry sessionRegistry,
             SessionRepository<?> sessions,
             ProblemResponses problems,
+            RateLimiter rateLimiter,
+            RateLimitProperties rateLimits,
             Clock clock,
             StringRedisTemplate redis,
             OAuth2AccessTokenResponseClient<OAuth2AuthorizationCodeGrantRequest> codeTokenClient,
@@ -114,7 +117,8 @@ class SecurityConfiguration {
                 .logout(logout ->
                         logout.logoutSuccessHandler(new LogoutRedirectHandler(registrations, properties, jsonMapper)))
                 .addFilterAfter(absoluteTimeout, SecurityContextHolderFilter.class)
-                .addFilterAfter(revalidation, AbsoluteSessionTimeoutFilter.class);
+                .addFilterAfter(revalidation, AbsoluteSessionTimeoutFilter.class)
+                .addFilterAfter(new RateLimitFilter(rateLimits, rateLimiter, problems), AuthorizationFilter.class);
         return http.build();
     }
 

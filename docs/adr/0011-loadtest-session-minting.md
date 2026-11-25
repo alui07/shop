@@ -49,4 +49,8 @@ k6 has to drive checkout and the flash sale as signed-in customers, 150 at once.
 ## Deviations from the brief
 
 - The summary files are `<scenario>-summary.json` and `.md`, not bare `summary.json` (`loadtest/README.md`).
-- Rate limiting of the front door and the gateway's body limits are not part of this slice (D38, slice 5c). The mint limiter is per pod and is the only limiter in the cluster.
+- Rate limiting of the front door and the gateway's body limits are not part of this slice (D38). The mint limiter is per pod and was the only limiter in the cluster until slice 5c, which added the per-IP and per-account limits of ADR 0013; the runs in this ADR's measurements were taken without them.
+
+## Slice 5c addition: limits in load-test overlays
+
+Status: accepted (slice 5c, 2026-11-25). Every `overlays/loadtest*` render (through the `loadtest` component) sets `SHOP_RATE_LIMIT_SCALE=1000` on the API and raises every Envoy per-IP rule to 100 000 per unit by a JSON6902 patch, because all k6 traffic shares one source address and virtual users check out faster than a person (ADR 0013, D44). The limiter code still runs, so its Valkey round trip is in the numbers. `make k8s-lint` runs `k8s-rate-limit-guard`: it fails if a `local` or `obs` render differs from base in any `BackendTrafficPolicy` or `ClientTrafficPolicy` (limits, units, selectors, body buffer, overrides) or carries an API rate-limit setting in any spelling (`SHOP_RATE_LIMIT_*`, `shop.rate-limit`), or if a `loadtest` render has any Envoy rule below 100 000. The guard reads rendered manifests, so it cannot see a limit changed outside them (ADR 0013), and k6 fails a run on any 429 outside `setup()` (counter `rate_limited`). Minted sessions are limited per account like login sessions: a virtual user cannot hit a limit at the load test's rates, which the scale and the 429 threshold prove. The mint limiter stays per pod (R61). Residual: the real limits are untested under load (R70).

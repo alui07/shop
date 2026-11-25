@@ -120,7 +120,7 @@ class RequestBodyLimitFilterTest {
 
     @Test
     void pathsOutsideTheCustomerApiAreNotLimited() throws Exception {
-        for (String path : new String[] {"/logout", "/api/admin/products", "/actuator/health"}) {
+        for (String path : new String[] {"/logout", "/actuator/health"}) {
             MockHttpServletRequest request = new MockHttpServletRequest("POST", path);
             request.setContent(new byte[LIMIT * 2]);
             MockHttpServletResponse response = new MockHttpServletResponse();
@@ -131,6 +131,45 @@ class RequestBodyLimitFilterTest {
             assertThat(seen.get()).as(path).isSameAs(request);
             assertThat(response.getStatus()).isEqualTo(200);
         }
+    }
+
+    @Test
+    void adminBodiesHaveTheirOwnLargerLimitDeclaredOrStreamed() throws Exception {
+        int adminLimit = RequestBodyLimitFilter.ADMIN_LIMIT_BYTES;
+        assertThat(adminLimit).isGreaterThan(LIMIT);
+
+        MockHttpServletRequest declared = new MockHttpServletRequest("POST", "/api/admin/products");
+        declared.setContentType("application/json");
+        declared.setContent(new byte[adminLimit + 1]);
+        MockHttpServletResponse refused = new MockHttpServletResponse();
+        filter.doFilter(declared, refused, (req, res) -> {
+            throw new AssertionError("the request must be refused");
+        });
+        assertThat(refused.getStatus()).isEqualTo(413);
+
+        MockHttpServletRequest between = streamed("/api/admin/products", LIMIT + 1);
+        between.setContentType("application/json");
+        ServletInputStream accepted = limitedStream(between);
+        assertThat(accepted.readNBytes(LIMIT + 1)).hasSize(LIMIT + 1);
+
+        MockHttpServletRequest over = streamed("/api/admin/products", adminLimit + 1);
+        over.setContentType("application/json");
+        ServletInputStream tooLarge = limitedStream(over);
+        assertThatThrownBy(() -> tooLarge.readNBytes(adminLimit + 1)).isInstanceOf(BodyTooLargeException.class);
+    }
+
+    @Test
+    void anAdminBodyThatIsNotJsonIsRefusedLikeAnyOther() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/admin/products");
+        request.setContentType("application/x-www-form-urlencoded");
+        request.setContent(new byte[] {'a'});
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, (req, res) -> {
+            throw new AssertionError("the request must be refused");
+        });
+
+        assertThat(response.getStatus()).isEqualTo(415);
     }
 
     private static final class NoOpListener implements ReadListener {

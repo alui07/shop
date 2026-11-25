@@ -2,7 +2,7 @@
 // WARMUP (default 0s; a discarded warm-up phase, tagged load:warmup so it stays out of thresholds and summary).
 import { BASE_URL, BROWSE_DURATION, BROWSE_RATE, BROWSE_WARMUP } from '../lib/config.js';
 import { browseVisit, discoverCatalog } from '../lib/shop.js';
-import { summaryOutputs, trendStats } from '../lib/checks.js';
+import { rateLimitThreshold, summaryOutputs, trendStats } from '../lib/checks.js';
 
 const arrivalRate = (duration, startTime, exec) => ({
     executor: 'constant-arrival-rate',
@@ -24,6 +24,7 @@ export const options = {
     scenarios,
     summaryTrendStats: trendStats,
     thresholds: {
+        ...rateLimitThreshold,
         'http_req_failed{load:shop}': ['rate<0.01'],
         'http_req_duration{load:shop}': ['p(95)<500'],
         'http_reqs{load:shop}': ['count>0'],
