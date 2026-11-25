@@ -74,6 +74,11 @@ class OpenApiContractIT {
         }
     }
 
+    @Test
+    void theLoadtestSessionEndpointIsNeverDocumented() {
+        assertThat(liveDocument().get("paths").propertyNames()).noneMatch(path -> path.startsWith("/api/loadtest"));
+    }
+
     private ObjectNode liveDocument() {
         ObjectNode document =
                 (ObjectNode) JSON.readTree(get(port, "/v3/api-docs").body());

@@ -83,6 +83,10 @@ OTEL_COLLECTOR_IMAGE := otel/opentelemetry-collector-k8s:0.163.2@sha256:cce41429
 # renovate: datasource=docker depName=grafana/otel-lgtm
 OTEL_LGTM_IMAGE := grafana/otel-lgtm:0.41.0@sha256:2e3290657f2f2a256c7a9175f097424a3ac5b54840741ace433e108e109348b6
 
+# Load generator for `make loadtest`; the tag was pushed 2026-11-12.
+# renovate: datasource=docker depName=grafana/k6
+K6_IMAGE := grafana/k6:2.4.0@sha256:d41bb79cd8de5a7ad619b53570e3712633e8bff0937010a5c6c57a4747e7a276
+
 # Schema commits for k8s-lint; update by hand together with the node image and chart versions (the CRD schemas must match the charts).
 K8S_SCHEMAS_REF := 9367d1ce1c88b8bbf6ee06d0e80510f26394913f
 CRD_SCHEMAS_REF := 49729e49e8f062933e3716a26540d41b0cd0856c

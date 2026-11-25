@@ -75,6 +75,10 @@ Namespaces outside `shop` get no policies; slice 5a adds `api-to-otel-collector`
 
 **cgroup v1 locally, v2 in CI.** Host facts on the owner's machine (2026-11-21): 15.6 GiB, 12 CPUs, cgroup v1, no `.wslconfig` (WSL's default of half the host memory applies). CI is cgroup v2. The metrics-server and `pdb-test.sh` behaviour on cgroup v2 is unverified until the first pull request run.
 
+## Slice 5b additions (load test overlays)
+
+**Overlays for load tests.** `loadtest` = `obs` plus component `loadtest` (profile `seed,loadtest`, the token Secret, sampling 0.1, a Valkey CPU limit of 1, a Gateway listener on 8090 with NodePort 30090 and an HTTPRoute for `POST /api/loadtest/sessions` only). `loadtest-pinned` fixes the HPA at 2 replicas; `loadtest-nocache` adds `SPRING_CACHE_TYPE=none` on top of that. `k8s-lint` renders all five overlays and a guard fails if `local` or `obs` mention `loadtest`. `make loadtest` always ends with `deploy OVERLAY=obs`. The base `shop` HTTPRoute returns 404 for `/api/loadtest` and strips `Shop-Loadtest-Token` on `/api`. The 30090 mapping has no host port: it is reachable from the `kind` Docker network (ADR 0011, R60). No cluster recreate is needed.
+
 ## Consequences
 
 - The laptop and CI run the same cluster configuration, and policy enforcement is tested, not assumed. They differ in cgroup version (see below).

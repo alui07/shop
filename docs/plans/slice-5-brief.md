@@ -259,3 +259,19 @@ Fixed interfaces gain: channel `shop:catalog-changed`, overlay `loadtest-pinned`
 ### C27 (orchestrator, 2026-11-21, from the C16 spike)
 
 The spike passed (`build/reports/slice-5a-spike/report.md`): first metrics about 32 s after install, test HPA scaled 1 to 3 in 64 s on the cgroup v1 node. The real install uses chart `metrics-server` 3.14.0 (app v0.9.0) with `--kubelet-insecure-tls` only (`--metric-resolution=15s` is the chart default; do not repeat it), and pins the metrics-server image by digest in `deploy/versions.mk` like every other image. A new target pod reads `cpu: <unknown>` for about 45 s, with `FailedGetResourceMetric` and `FailedComputeMetricsReplicas` warning events until the first sample: the C18 readiness wait and the C1 settle check tolerate this, and no check asserts the absence of HPA warning events.
+
+### C28 (orchestrator, 2026-11-21, 5b start): probe and script interface
+
+The C6 probe is a k6 script, `loadtest/scenarios/probe-front-door.js`, run like the other scenarios on the `kind` network: the k6 image and the Alpine `k8s-tools` image have no curl. LOADTEST's helpers are `loadtest/scripts/{hpa-sampler,settle,hpa-gate,sql,flash-verify,db-stats}.sh`, POSIX `sh` run in `k8s-tools` with the repo at `/work` and the run directory at `/reports`; `make/loadtest.mk` writes `/reports/t0` and `/reports/t1` (epoch seconds) around the flash sale for `hpa-gate.sh`. k6 receives only `SHOP_LOADTEST_TOKEN` of the secrets, as an environment variable that is never echoed.
+
+### C29 (orchestrator, 2026-11-24, 5b implementation)
+
+k6 summaries are `<scenario>-summary.{json,md}`, not `summary.json` (5.1). k6 re-mints sessions after 3.5 minutes (`SESSION_MAX_AGE_MS`), leaving margin under the 5-minute session. The load-testing ADR is split: ADR 0011 (minting), ADR 0012 (cache); HPA and PDB framing sit in ADR 0005 and `docs/performance.md`. Threat model entries run L1 to L10 (L9, L10 cover the cache channel). `make deploy` creates Secret `shop-loadtest` in every overlay through the shared secrets step; only the loadtest component references it.
+
+### C30 (orchestrator, 2026-11-24, 5b load run)
+
+The C6 probe treats a 2xx with `Content-Type: text/html` as no mint: the nginx SPA fallback answers path variants such as `/API/loadtest/sessions` with `index.html`, no cookie and no API call. A `__Host-SESSION` cookie on any response, or any other 2xx, still fails the probe.
+
+### C31 (orchestrator, 2026-11-24, 5b review round 1)
+
+With the `loadtest` profile off, `POST /api/loadtest/sessions` answers 401, not 403 (2.7): the main chain's `denyAll` on an anonymous request yields 401; a 403 would mean a CSRF failure. `LoadtestAbsentIT` asserts 401 and is correct. Review round 1 findings from both reviewers (`build/reports/slice-5b-review-r1.md`, `build/reports/slice-5b-security-review-r1.md`) are all accepted; notable design changes: the Valkey listener container starts after readiness with retry, so Valkey is not a startup dependency (R1); C6 is enforced in CI by `cluster-e2e` asserting Envoy's 404 on the mint path and its variants (R6, S5); k6 summaries omit `setup_data` and a run fails if a summary holds a session cookie (S1); the overlay guard scans the whole rendered output of every non-`loadtest*` overlay (S2).

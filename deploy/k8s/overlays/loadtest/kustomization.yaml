@@ -1,0 +1,8 @@
+# obs plus session minting for k6 (component loadtest). make loadtest deploys it and always returns to overlays/obs.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: shop
+resources:
+  - ../obs
+components:
+  - ../../components/loadtest
