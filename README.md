@@ -134,6 +134,16 @@ SELECT id, listener_id, event_type, serialized_event, publication_date, completi
 
 `EventRetryJob` picks the row up on its next run (every 60 s).
 
+### Load tests in kind
+
+```
+make loadtest             # flash sale, checkout and browse under k6, with the HPA gate (SCENARIO=browse|checkout|flash-sale runs one)
+make loadtest-cache       # browse with the catalog cache off and on, three runs each on two pinned API replicas
+make loadtest-lint        # k6 inspect on every scenario (part of make lint; needs no cluster)
+```
+
+Both load targets need `make cluster-up`, install `obs` (Grafana at http://grafana.localhost:8088 shows the run live) and refuse to start while `make dev` is running. k6 runs in a container on the `kind` network. It gets customer sessions from a mint endpoint that exists only under the `loadtest` Spring profile, on a separate NodePort (30090, no host port), with the token `SHOP_LOADTEST_TOKEN` from `.cache/secrets/shop.env` (made by `make secrets`). The front door answers 404 for it: `make cluster-e2e` asserts Envoy's 404 on the mint path and its variants, and `make loadtest` probes it first. Every run ends by redeploying `OVERLAY=obs` from an exit trap. The cleanup ignores further INT, TERM, HUP and PIPE in the shell and runs the closing deploy in its own session (`setsid -w`, which the host needs) with its output in `restore-obs.log` in the run directory, so a terminal Ctrl-C, a dead `| tee` pipe or a closed terminal cannot abort it. A SIGKILL or a host shutdown cannot be handled. If the restore fails, the run prints that the endpoint is still live and how to remove it (`make deploy OVERLAY=obs`) and writes `RESTORE-FAILED` in the run directory and in `build/reports/loadtest/`. A successful `make deploy` of any non-`loadtest*` overlay (the recovery, `make deploy OVERLAY=obs`) removes the fixed marker; the run-directory copy stays as a record. `make cluster-e2e` fails while that marker, the `loadtest` HTTPRoute or a Service on NodePort 30090 exists. On every exit (success, failure or interrupt) the run also fails if a report holds a session cookie or XSRF token (`__Host-SESSION`, `XSRF-TOKEN` or `"xsrf"` in cookie, JSON, header or URL-encoded form, any case; the run directory only, not k6 console output). Reports (k6 summaries, `hpa.csv`, `flash-verify.txt`, `probe.txt`, database counters) go to `build/reports/loadtest/<RUN_ID>/`. Run `make cluster-e2e` afterwards to confirm the cluster is clean: test products are deactivated, not deleted, and the `loadtest` category stays in the category list. Measured numbers and method: `docs/performance.md`. Scenarios and scripts: `loadtest/README.md`. Why: `docs/adr/0011-loadtest-session-minting.md`, `docs/adr/0012-catalog-cache.md`.
+
 ### Admin writes locally
 
 Sign in as `admin@example.test` at http://localhost:5173 (`make dev`) and open Admin. "New product" creates a product (unchecked `Active` keeps it hidden from the public catalog); a product's edit page changes its fields and, in a separate form, its stock. The Audit link lists every create, edit and stock change with the admin's display name and time (the API also returns the actor's `sub`; the table does not show it yet). Each form saves with the version it loaded, so two admins editing the same product get a conflict message instead of overwriting each other. Design and rules: `docs/adr/0007-admin-product-and-stock.md`.
@@ -145,6 +155,7 @@ Sign in as `admin@example.test` at http://localhost:5173 (`make dev`) and open A
 | none (production defaults) | JSON logs, no demo data, `/v3/api-docs` off |
 | `dev` | Readable console logs, `/v3/api-docs` on |
 | `seed` | Loads the demo catalog (about 60 products, 6 categories) with stock quantities |
+| `loadtest` | Adds `POST /api/loadtest/sessions`, which mints customer sessions for k6. Only `overlays/loadtest*` enable it; it refuses to start unless `shop.auth.public-origin` is on `localhost` or `127.0.0.1`, and lint fails if any non-`loadtest*` overlay or a compose file mentions it, or if an overlay loses the front door's `/api/loadtest` 404 rule (ADR 0011) |
 
 ## Targets
 
@@ -159,9 +170,12 @@ Run `make help` for the list. `make ci` is exactly what the PR workflow runs: `l
 | `build` | Images `shop/api:dev` and `shop/web:dev` |
 | `e2e` | Playwright tests in Chromium against the built images behind a test-only gateway; reports in `build/reports/e2e`. Pass Playwright arguments with `E2E_ARGS`, e.g. `make e2e E2E_ARGS=specs/catalog.spec.ts` |
 | `cluster-up`, `cluster-down` | Create the kind cluster `shop` with its add-ons (idempotent), and remove it with its kubeconfig |
-| `deploy` | Build, load `shop/api:dev` and `shop/web:dev` into the cluster and apply `deploy/k8s/overlays/local`; `OVERLAY=obs` also exports telemetry |
+| `deploy` | Build, load `shop/api:dev` and `shop/web:dev` into the cluster and apply `deploy/k8s/overlays/local`; `OVERLAY=obs` also exports telemetry; `loadtest`, `loadtest-pinned` and `loadtest-nocache` are for the load targets (below) |
 | `cluster-e2e` | The Playwright suite against Envoy in the cluster, plus the NetworkPolicy test, the PDB eviction check and an HPA replica report; reports in `build/reports/cluster-e2e`. `E2E_ARGS` works as for `e2e` |
 | `cluster-smoke`, `cluster-diagnostics`, `cluster-traffic` | Check `127.0.0.1:8088`, collect pod state and logs, and send steady traffic (used to watch a rollout) |
+| `loadtest` | k6 flash sale, checkout and browse against kind with the HPA gate; `SCENARIO=browse\|checkout\|flash-sale` runs one, `RATE` and `DURATION` tune browse, `FLASH_HOLD_RATE` the flash-sale hold; reports in `build/reports/loadtest/<RUN_ID>` (needs `cluster-up`) |
+| `loadtest-cache` | Browse with the catalog cache off and on, three runs each on two pinned replicas (needs `cluster-up`) |
+| `loadtest-lint` | `k6 inspect` on every scenario in `loadtest/scenarios` (part of `lint`) |
 | `obs-up`, `obs-down` | Install or remove the observability stack in kind (needs `cluster-up`); Grafana at http://grafana.localhost:8088 |
 | `obs-check`, `obs-check-dev` | Fail when a metric the dashboard queries is missing in the kind Prometheus (after `make deploy OVERLAY=obs`) or in the compose `otel-lgtm` (after `make dev OBS=1`) |
 | `obs-memory` | Fail when the memory requests in `obs` exceed 1 GiB (run by `obs-up`) |
@@ -192,6 +206,10 @@ deploy/k8s/overlays/local/  also Mailpit (`mailpit.yaml`) and its NetworkPolicie
 deploy/kind/                kind cluster config, Calico, Helm values (incl. metrics-server), GatewayClass
 deploy/observability/       Helm values for the obs stack, the Grafana route, the dashboard (`dashboards/shop-api.json`, shared by both stacks) and `check-metrics.sh`
 deploy/k8s/components/otel/ OTLP export environment and its NetworkPolicy; `overlays/obs` applies it
+deploy/k8s/components/loadtest/ the `loadtest` profile, token, mint listener and route; overlays `loadtest`, `loadtest-pinned` (HPA fixed at 2) and `loadtest-nocache` (cache off) build on `obs`
+make/loadtest.mk            load test targets and the guards that keep session minting out of other stacks
+loadtest/                   k6 scenarios, helper scripts and SQL (`loadtest/README.md`)
+docs/performance.md         load test method, thresholds and results
 make/obs.mk                 observability targets
 deploy/k8s-tools/           Dockerfile for the kind, Helm and kubectl tools image
 tests/e2e/                  Playwright project and its Compose stack
@@ -208,8 +226,8 @@ build/                      gitignored reports
 
 - `docs/plans/`: the master plan, the brief for each slice and `STATUS.md`. Start with `docs/plans/README.md` to see where the work stands and how to resume it.
 - `tests/`: every kind of test, what it proves and how to run it, how the end-to-end stack works and how to debug it (`tests/README.md`). Unit and integration tests live next to the code in each app.
-- `docs/adr/`: why the tooling, testing, catalog API, web security headers, local Kubernetes cluster, authentication, admin writes, checkout with stock reservation, payment with the webhook, outbox and registration, and observability are set up this way.
-- `docs/threat-model.md`: assets, trust boundaries, threats and residual risks of sign-in, sessions, admin writes, checkout, payment with the webhook, and the observability stack.
+- `docs/adr/`: why the tooling, testing, catalog API, web security headers, local Kubernetes cluster, authentication, admin writes, checkout with stock reservation, payment with the webhook, outbox and registration, observability, session minting for load tests, and the catalog cache are set up this way.
+- `docs/threat-model.md`: assets, trust boundaries, threats and residual risks of sign-in, sessions, admin writes, checkout, payment with the webhook, the observability stack, load-test session minting and the catalog cache channel.
 
 ## Manual steps
 
@@ -230,10 +248,11 @@ Some things cannot be automated: first-time Docker group setup, checking the fir
 - Cookies are not port-scoped: `__Host-SESSION` and `__Host-XSRF-TOKEN` from `localhost:8088` are also sent to Keycloak on `localhost:8089`, and the XSRF cookie is script-readable there. Separation needs distinct hostnames (`docs/threat-model.md`, R4).
 - No rate limiting until slice 5c. Keycloak's brute-force protection sees only the gateway address, so anyone can lock out an account.
 - Valkey keeps no data: a restart signs everyone out. Keycloak in kind re-creates the realm on every restart (new signing keys, SSO sessions lost); the Deployment uses `Recreate`. Compose Keycloak databases are tmpfs, so the realm is imported fresh on each start.
-- With Valkey down, the public catalog keeps working but a request carrying a session cookie gets 503. With Keycloak down, sign-in fails and signed-in sessions continue until the 15-minute revalidation grace ends. Role changes and disabled users take effect within about 5 minutes. A refused revalidation ends the session and clears its CSRF token; a refresh without an ID token counts as Keycloak being unavailable.
+- With Valkey down, the public catalog keeps working (also for an API pod that starts meanwhile: the catalog-cache subscription retries after readiness) but a request carrying a session cookie gets 503. With Keycloak down, sign-in fails and signed-in sessions continue until the 15-minute revalidation grace ends. Role changes and disabled users take effect within about 5 minutes. A refused revalidation ends the session and clears its CSRF token; a refresh without an ID token counts as Keycloak being unavailable.
 - In kind, Valkey's image version is pinned only in `deploy/versions.mk`, and a secrets hash annotation restarts `api` and `keycloak` when `.cache/secrets/shop.env` changes.
 - The client IP from `X-Forwarded-For` is not trustworthy yet and nothing uses it; fix it in slice 5c before rate limits use it (`docs/threat-model.md`, R20).
-- Observability (slice 5a): the `obs` namespace has no NetworkPolicies and Grafana allows anonymous Viewer on loopback (R55, R56); a client-supplied `traceparent` sets its request's trace id (R57); export failures only drop telemetry (R58). Gateway body limits, `statement_timeout` and Alertmanager rules move to slice 5c; gateway limits, rate limits and the `X-Forwarded-For` fix are listed above. Load tests and the catalog cache are slice 5b.
+- Observability (slice 5a): the `obs` namespace has no NetworkPolicies and Grafana allows anonymous Viewer on loopback (R55, R56); a client-supplied `traceparent` sets its request's trace id (R57); export failures only drop telemetry (R58). Gateway body limits, `statement_timeout` and Alertmanager rules move to slice 5c; gateway limits, rate limits and the `X-Forwarded-For` fix are listed above. Load tests and the catalog cache are slice 5b (next bullet).
+- Load tests and the catalog cache (slice 5b): the numbers are one-host numbers (one kind node, the cluster, k6 and `obs` share 12 CPUs and 15.6 GiB; cgroup v1 locally, CI is cgroup v2 and runs no load tests) and were taken without rate limits, which move to slice 5c, and without Keycloak on the path (`docs/performance.md`). The `loadtest` profile's classes ship in the production image but are inert without the profile (R59). While a load run is deployed, anyone on the `kind` Docker network who holds the token can mint customer sessions through NodePort 30090 (R60). The mint limiter is per pod (R61). Catalog reads can be up to 30 s old on any pod after an admin write (R62, R63; ADR 0012), and the `productPage` cache key space is bounded only by `maximumSize` (R64). `make loadtest` and `loadtest-cache` leave test orders, carts and the `loadtest` category in the kind database until `make cluster-down`. `loadtest/README.md` lists the script limits.
 - Keycloak's image scan fails only on fixable CRITICAL findings; HIGH is reported (gated in slice 6).
 - Until 2026-12-02 `scan-web` ignores 6 HIGH nginx 1.30.6 CVEs (HTTP/2, HTTP/3, TLS, mail, proxy with SSI or mirror; none reachable with `apps/web/nginx.conf`) in `apps/web/.trivyignore.yaml`, pending the nginx-unprivileged 1.30.7 image.
 - Playwright traces from failed e2e runs record typed test passwords (`tests/README.md`).

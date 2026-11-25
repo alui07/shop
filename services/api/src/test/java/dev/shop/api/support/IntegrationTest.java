@@ -15,7 +15,8 @@ import org.springframework.boot.test.context.SpringBootTest;
             "management.server.port=0",
             "springdoc.api-docs.enabled=true",
             "shop.jobs.enabled=false",
-            "shop.payment.provider=fake"
+            "shop.payment.provider=fake",
+            "spring.cache.type=none"
         })
 @TestInfrastructure
 public @interface IntegrationTest {}

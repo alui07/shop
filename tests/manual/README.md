@@ -191,6 +191,23 @@ Run these on `make dev` (http://localhost:5173, Mailpit on http://localhost:8025
   - Steps: with either stack exporting, pay an order on the fake provider page, then in Grafana search traces for `/api/fake-psp` and open the spans.
   - Expected: the URL attribute reads `/api/fake-psp/payments/{token}`; the real token appears in no attribute.
 
+## Load tests (slice 5b)
+
+- [ ] **Watch the HPA and the dashboard during a flash sale**
+  - Why manual: the automated gate (`hpa-gate.sh`) reads samples and events; only a person sees whether the dashboard panels and the scale-up look right while it happens.
+  - Steps: `make cluster-up`, make sure `make dev` is down, then `make loadtest SCENARIO=flash-sale` in one terminal. In a second, `make kubectl ARGS="-n shop get hpa api -w"`. Open http://grafana.localhost:8088 and the "Shop API" dashboard. Watch request rate, p95, Hikari active and pending, the replica panel and CPU through the burst and the 3-minute hold.
+  - Expected: desired replicas rise above 2 within about a minute or two of the burst, new pods turn ready, the replica panel follows, Hikari pending stays low, and after the run the HPA returns to 2. `build/reports/loadtest/<RUN_ID>/hpa-gate.txt` says PASS and `flash-verify.txt` has only PASS lines. Record the numbers in `docs/performance.md`.
+
+- [ ] **The minting endpoint is gone after a run and never on the front door**
+  - Why manual: it confirms the exit trap and the route state in a live cluster, which no unit test sees.
+  - Steps: after `make loadtest` (also after an interrupted one, Ctrl+C), run `make kubectl ARGS="-n shop get httproute"` and `make kubectl ARGS="-n shop get deploy api -o jsonpath={.spec.template.spec.containers[0].env}"`. Then `curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Shop-Loadtest-Token: x' http://localhost:8088/api/loadtest/sessions`.
+  - Expected: no HTTPRoute named `loadtest`, no `loadtest` in the API's environment (check without printing the token Secret), and the `curl` prints 404.
+
+- [ ] **Clean up after a load run**
+  - Why manual: test orders and carts stay in the kind database.
+  - Steps: run `make cluster-e2e` after `make loadtest` or `make loadtest-cache`. If count-based specs fail on the leftover `loadtest` category or products, `make cluster-down cluster-up deploy`.
+  - Expected: `cluster-e2e` passes; seeded stock is unchanged.
+
 ## After the first push to GitHub
 
 - [ ] **Pull request workflow is green on a Linux runner**

@@ -1,4 +1,107 @@
+import { createServer, request as httpRequest } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { expect, frontDoorOrigin, issuer, test } from './support/test';
+
+interface RawResponse {
+  status: number;
+  setCookies: string[];
+  contentType: string;
+  body: string;
+}
+
+// Playwright's request API runs paths through URL parsing, which collapses `/./`; node:http sends the path as written.
+function rawPost(
+  hostPort: string,
+  path: string,
+  headers: Record<string, string>,
+): Promise<RawResponse> {
+  const [hostname, port] = hostPort.split(':');
+  return new Promise((resolve, reject) => {
+    const outgoing = httpRequest(
+      { hostname, port: Number(port), path, method: 'POST', headers },
+      (incoming) => {
+        const chunks: Buffer[] = [];
+        incoming.on('data', (chunk: Buffer) => chunks.push(chunk));
+        incoming.on('end', () =>
+          resolve({
+            status: incoming.statusCode ?? 0,
+            setCookies: incoming.headers['set-cookie'] ?? [],
+            contentType: incoming.headers['content-type'] ?? '',
+            body: Buffer.concat(chunks).toString('utf8'),
+          }),
+        );
+      },
+    );
+    outgoing.on('error', reject);
+    outgoing.end();
+  });
+}
+
+const mintPathVariants = [
+  '/api/loadtest/sessions',
+  '/api/loadtest/sessions/',
+  '/api/%6Coadtest/sessions',
+  '/API/LOADTEST/SESSIONS',
+  '//api/loadtest/sessions',
+  '/api//loadtest/sessions',
+  '/api/./loadtest/sessions',
+  '/api/loadtest/./sessions',
+  '/api/loadtest/sessions;jsessionid=x',
+];
+
+// Every variant the Gateway's PathPrefix /api/loadtest rule catches after Envoy's path normalisation
+// (see build/reports/loadtest/lr-full/probe.txt). Case changes, %2F and mid-path `;` are not caught by it
+// and are left to the API's own deny rules.
+const gatewayNotFoundPaths = [
+  ...mintPathVariants.filter((path) => !path.startsWith('/API/')),
+  '/api/loadtest',
+  '/api/loadtest/',
+];
+
+const runsAgainstKindGateway = (process.env.E2E_UPSTREAM ?? '').startsWith('shop-control-plane:');
+
+test('the raw-path helper sends every mint path variant byte for byte', async () => {
+  const received: string[] = [];
+  const server = createServer((incoming, outgoing) => {
+    received.push(incoming.url ?? '');
+    outgoing.end();
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const { port } = server.address() as AddressInfo;
+    for (const path of mintPathVariants) await rawPost(`127.0.0.1:${port}`, path, {});
+  } finally {
+    server.close();
+  }
+
+  expect(received).toEqual(mintPathVariants);
+});
+
+test('the loadtest mint endpoint is not reachable through the front door in any path variant', async () => {
+  const upstream = process.env.E2E_UPSTREAM ?? '';
+  for (const path of mintPathVariants) {
+    const response = await rawPost(upstream, path, {
+      Host: new URL(frontDoorOrigin).host,
+      'Shop-Loadtest-Token': 'dummy-token',
+    });
+
+    expect(response.status, path).not.toBe(201);
+    expect(response.setCookies.join('\n'), path).not.toContain('__Host-SESSION');
+  }
+});
+
+test('the kind Gateway answers its own empty 404 for every loadtest path variant', async () => {
+  test.skip(!runsAgainstKindGateway, 'only the kind Gateway has the /api/loadtest not-found rule');
+  for (const path of gatewayNotFoundPaths) {
+    const response = await rawPost(process.env.E2E_UPSTREAM ?? '', path, {
+      Host: new URL(frontDoorOrigin).host,
+    });
+
+    expect(response.status, path).toBe(404);
+    expect(response.body, path).toBe('');
+    expect(response.contentType, path).not.toContain('problem+json');
+  }
+});
 
 test('the browser sees the front door as a secure context', async ({ page }) => {
   await page.goto('/');

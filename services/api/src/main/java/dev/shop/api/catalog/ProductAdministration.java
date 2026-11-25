@@ -16,9 +16,11 @@ import org.springframework.transaction.annotation.Transactional;
 public class ProductAdministration {
 
     private final ProductRepository repository;
+    private final CatalogCacheInvalidation cacheInvalidation;
 
-    ProductAdministration(ProductRepository repository) {
+    ProductAdministration(ProductRepository repository, CatalogCacheInvalidation cacheInvalidation) {
         this.repository = repository;
+        this.cacheInvalidation = cacheInvalidation;
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
@@ -39,6 +41,7 @@ public class ProductAdministration {
     public ManagedProduct create(NewProduct product) {
         long categoryId = categoryId(product.categorySlug());
         long id = repository.insertIfSlugFree(product, categoryId).orElseThrow(DuplicateSlugException::new);
+        cacheInvalidation.afterCommit();
         return get(id);
     }
 
@@ -54,6 +57,7 @@ public class ProductAdministration {
             return new ProductUpdate(before, before);
         }
         repository.update(id, changes, categoryId);
+        cacheInvalidation.afterCommit();
         return new ProductUpdate(before, get(id));
     }
 

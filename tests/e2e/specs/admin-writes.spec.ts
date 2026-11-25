@@ -22,6 +22,14 @@ async function fillProductForm(
   await page.getByLabel('Category').selectOption({ label: 'Garden' });
 }
 
+// A public read after an admin write can hit a pod whose catalog cache is cleared a moment later by the pub/sub message.
+async function expectAfterReload(page: Page, assertion: () => Promise<void>): Promise<void> {
+  await expect(async () => {
+    await page.reload();
+    await assertion();
+  }).toPass({ timeout: 5_000 });
+}
+
 async function openEditPage(page: Page, id: number): Promise<void> {
   await page.goto(`/admin/products/${id}`);
   await expect(page.getByRole('heading', { level: 1, name: 'Edit product' })).toBeVisible();
@@ -92,11 +100,17 @@ test('an admin creates, edits, stocks and deactivates a product, and the audit l
 
     await test.step('the public catalog shows the active product', async () => {
       await page.goto(`/products/${slug}`);
-      await expect(page.getByRole('heading', { level: 1, name })).toBeVisible();
-      await expect(page.getByText('€16.50')).toBeVisible();
+      await expectAfterReload(page, async () => {
+        await expect(page.getByRole('heading', { level: 1, name })).toBeVisible({ timeout: 1_000 });
+        await expect(page.getByText('€16.50')).toBeVisible({ timeout: 1_000 });
+      });
 
       await page.goto('/?q=Quokka');
-      await expect(page.getByRole('article').filter({ hasText: name })).toBeVisible();
+      await expectAfterReload(page, async () => {
+        await expect(page.getByRole('article').filter({ hasText: name })).toBeVisible({
+          timeout: 1_000,
+        });
+      });
     });
 
     await test.step('setting stock shows in the admin table', async () => {
@@ -141,9 +155,11 @@ test('an admin creates, edits, stocks and deactivates a product, and the audit l
       await expect(page.getByText('Product saved')).toBeVisible();
 
       await page.goto(`/products/${slug}`);
-      await expect(
-        page.getByRole('heading', { level: 1, name: 'Product not found' }),
-      ).toBeVisible();
+      await expectAfterReload(page, async () => {
+        await expect(
+          page.getByRole('heading', { level: 1, name: 'Product not found' }),
+        ).toBeVisible({ timeout: 1_000 });
+      });
     });
 
     await test.step('the audit log lists the changes for this product', async () => {

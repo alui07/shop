@@ -23,6 +23,11 @@ spring:
       password: ${SPRING_DATA_REDIS_PASSWORD:}
       timeout: 2s
       connect-timeout: 2s
+  cache:
+    type: caffeine
+    cache-names: categories,product,productPage
+    caffeine:
+      spec: maximumSize=2000,expireAfterWrite=30s,recordStats
   session:
     timeout: ${shop.auth.idle-session-timeout}
   mail:

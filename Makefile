@@ -11,7 +11,7 @@ HOST_GID := $(shell id -g)
 CACHE_DIR := $(CURDIR)/.cache
 SECRETS_DIR := $(CACHE_DIR)/secrets
 SECRETS_FILE := $(SECRETS_DIR)/shop.env
-SECRET_KEYS := SHOP_AUTH_CLIENT_SECRET VALKEY_PASSWORD KEYCLOAK_DB_PASSWORD KC_BOOTSTRAP_ADMIN_PASSWORD SHOP_TEST_CUSTOMER_PASSWORD SHOP_TEST_ADMIN_PASSWORD SHOP_PAYMENT_WEBHOOK_SECRET GRAFANA_ADMIN_PASSWORD
+SECRET_KEYS := SHOP_AUTH_CLIENT_SECRET VALKEY_PASSWORD KEYCLOAK_DB_PASSWORD KC_BOOTSTRAP_ADMIN_PASSWORD SHOP_TEST_CUSTOMER_PASSWORD SHOP_TEST_ADMIN_PASSWORD SHOP_PAYMENT_WEBHOOK_SECRET GRAFANA_ADMIN_PASSWORD SHOP_LOADTEST_TOKEN
 COMPOSE = docker compose --env-file $(SECRETS_FILE) -f deploy/compose/compose.yaml $(COMPOSE_OBS_FILE)
 E2E_COMPOSE := docker compose --env-file $(SECRETS_FILE) -p shop-e2e -f tests/e2e/compose.yaml
 E2E_DOWN := $(E2E_COMPOSE) --profile runner down --volumes --remove-orphans
@@ -48,7 +48,7 @@ MVN_IT_DOCKER = -v /var/run/docker.sock:/var/run/docker.sock --group-add $(or $(
 	--add-host=host.docker.internal:host-gateway -e TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal -e POSTGRES_IMAGE -e VALKEY_IMAGE -e MAILPIT_IMAGE
 
 export HOST_UID HOST_GID MAVEN_IMAGE POSTGRES_IMAGE VALKEY_IMAGE MAILPIT_IMAGE NGINX_IMAGE PLAYWRIGHT_IMAGE API_IMAGE WEB_IMAGE WEB_TOOLS_IMAGE MVN_ARGS \
-	KEYCLOAK_IMAGE KEYCLOAK_DEV_IMAGE OTEL_LGTM_IMAGE \
+	KEYCLOAK_IMAGE KEYCLOAK_DEV_IMAGE OTEL_LGTM_IMAGE K6_IMAGE \
 	K8S_TOOLS_IMAGE KUBECTL_IMAGE KUBECONFORM_IMAGE GOLANG_IMAGE DOCKER_CLI_IMAGE KIND_NODE_IMAGE
 
 KUBECONFORM_ARGS = -strict -summary -kubernetes-version $(K8S_VERSION) -cache /cache \
@@ -106,6 +106,7 @@ endef
 	k8s-tools k8s-lint cluster-up cluster-down cluster-smoke cluster-e2e cluster-diagnostics cluster-traffic deploy deploy-apply kubectl
 
 include make/obs.mk
+include make/loadtest.mk
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -150,7 +151,7 @@ api-stop: secrets ## Stop the API in the dev stack (to see the unavailable state
 api-start: secrets ## Start the API in the dev stack again
 	$(COMPOSE) start api
 
-lint: api-lint web-lint e2e-lint e2e-version-lock docker-lint workflow-lint compose-lint k8s-lint ## Spotless, ESLint, tsc, Prettier, hadolint, actionlint, zizmor, compose config, kubeconform
+lint: api-lint web-lint e2e-lint e2e-version-lock docker-lint workflow-lint compose-lint k8s-lint loadtest-lint ## Spotless, ESLint, tsc, Prettier, hadolint, actionlint, zizmor, compose config, kubeconform, k6 inspect
 
 test: api-test web-test ## Unit and integration tests for both apps; fails below 100% coverage
 
@@ -257,6 +258,10 @@ compose-lint: secrets
 	COMPOSE_PROFILES=obs $(COMPOSE) config -q
 	COMPOSE_PROFILES=obs $(COMPOSE) -f deploy/compose/compose.obs.yaml config -q
 	$(E2E_COMPOSE) --profile runner config -q
+	@$(call forbid_loadtest_in_compose,$(COMPOSE))
+	@$(call forbid_loadtest_in_compose,$(COMPOSE) --profile '*')
+	@$(call forbid_loadtest_in_compose,COMPOSE_PROFILES=obs $(COMPOSE) -f deploy/compose/compose.obs.yaml)
+	@$(call forbid_loadtest_in_compose,$(E2E_COMPOSE) --profile runner)
 
 scan-fs: cache-dirs
 	$(call trivy_report,fs --skip-dirs .git --skip-dirs .cache --skip-dirs build --skip-dirs '**/node_modules' --skip-dirs '**/target' --skip-dirs '**/dist' --skip-dirs '**/coverage' --skip-dirs tests/e2e/reports .,fs)
@@ -310,6 +315,7 @@ cluster-down: ## Remove the kind cluster and its kubeconfig
 deploy: secrets build k8s-tools cache-dirs ## Load the :dev images into kind and apply the app (needs make cluster-up); OVERLAY=obs exports telemetry
 	@if [ -z "$$(docker ps -q --filter $(KIND_LABEL))" ]; then echo "run make cluster-up first" >&2; exit 1; fi
 	@$(MAKE) --no-print-directory deploy-apply cluster-smoke || { $(MAKE) --no-print-directory cluster-diagnostics; exit 1; }
+	@$(loadtest_clear_restore_marker)
 	@echo "http://localhost:$(CLUSTER_PORT)"
 
 # Creates the Secrets the manifests reference from .cache/secrets/shop.env, which is mounted read-only. Nothing is printed; the keys are the variable names.
@@ -321,7 +327,8 @@ $(K8S_DOCKER) -v $(SECRETS_DIR):/secrets:ro $(K8S_TOOLS_IMAGE) sh -c ' \
 	kubectl -n shop create secret generic valkey-auth --from-literal="VALKEY_PASSWORD=$$VALKEY_PASSWORD" --dry-run=client -o yaml | apply; \
 	kubectl -n shop create secret generic keycloak-test-users --from-literal="SHOP_TEST_CUSTOMER_PASSWORD=$$SHOP_TEST_CUSTOMER_PASSWORD" \
 		--from-literal="SHOP_TEST_ADMIN_PASSWORD=$$SHOP_TEST_ADMIN_PASSWORD" --dry-run=client -o yaml | apply; \
-	kubectl -n shop create secret generic shop-payment --from-literal="SHOP_PAYMENT_WEBHOOK_SECRET=$$SHOP_PAYMENT_WEBHOOK_SECRET" --dry-run=client -o yaml | apply'
+	kubectl -n shop create secret generic shop-payment --from-literal="SHOP_PAYMENT_WEBHOOK_SECRET=$$SHOP_PAYMENT_WEBHOOK_SECRET" --dry-run=client -o yaml | apply; \
+	kubectl -n shop create secret generic shop-loadtest --from-literal="SHOP_LOADTEST_TOKEN=$$SHOP_LOADTEST_TOKEN" --dry-run=client -o yaml | apply'
 endef
 
 # Namespace and Secrets go in before the workloads so no pod starts against an old Secret. Each Deployment carries a hash of only the Secrets it consumes
@@ -338,18 +345,19 @@ deploy-apply:
 		hash() { printf "%s\n" "$$@" | sha256sum | cut -d" " -f1; }; \
 		SHOP_AUTH_HASH=$$(hash "$$SHOP_AUTH_CLIENT_SECRET"); VALKEY_AUTH_HASH=$$(hash "$$VALKEY_PASSWORD"); \
 		KEYCLOAK_TEST_USERS_HASH=$$(hash "$$SHOP_TEST_CUSTOMER_PASSWORD" "$$SHOP_TEST_ADMIN_PASSWORD"); \
-		SHOP_PAYMENT_HASH=$$(hash "$$SHOP_PAYMENT_WEBHOOK_SECRET"); \
+		SHOP_PAYMENT_HASH=$$(hash "$$SHOP_PAYMENT_WEBHOOK_SECRET"); SHOP_LOADTEST_HASH=$$(hash "$$SHOP_LOADTEST_TOKEN"); \
 		for attempt in 1 2 3; do \
 			kubectl kustomize deploy/k8s/overlays/$(OVERLAY) \
 				| sed -e "s/api-image-id-placeholder/$$API_IMAGE_ID/" -e "s/web-image-id-placeholder/$$WEB_IMAGE_ID/" -e "s/keycloak-image-id-placeholder/$$KEYCLOAK_IMAGE_ID/" \
 				-e "s/shop-auth-hash-placeholder/$$SHOP_AUTH_HASH/" -e "s/valkey-auth-hash-placeholder/$$VALKEY_AUTH_HASH/" -e "s/keycloak-test-users-hash-placeholder/$$KEYCLOAK_TEST_USERS_HASH/" \
-				-e "s/shop-payment-hash-placeholder/$$SHOP_PAYMENT_HASH/" \
+				-e "s/shop-payment-hash-placeholder/$$SHOP_PAYMENT_HASH/" -e "s/shop-loadtest-hash-placeholder/$$SHOP_LOADTEST_HASH/" \
 				-e "s|valkey-image-placeholder|$$VALKEY_IMAGE|" -e "s|mailpit-image-placeholder|$$MAILPIT_IMAGE|" \
 				| kubectl apply --server-side --field-manager=shop-deploy -f - && exit 0; \
 			echo "apply failed (attempt $$attempt of 3)" >&2; sleep 10; \
 		done; exit 1'
 	$(K8S_RUN) sh -c 'rendered=$$(kubectl kustomize deploy/k8s/overlays/$(OVERLAY)); for policy in $(OBS_ONLY_NETWORK_POLICIES); do \
-		printf "%s\n" "$$rendered" | grep -qx "  name: $$policy" || kubectl -n shop delete networkpolicy "$$policy" --ignore-not-found; done'
+		printf "%s\n" "$$rendered" | grep -qx "  name: $$policy" || kubectl -n shop delete networkpolicy "$$policy" --ignore-not-found; done; \
+		printf "%s\n" "$$rendered" | grep -qx "  name: loadtest" || kubectl -n shop delete httproute loadtest --ignore-not-found'
 	$(KUBECTL) wait --for=condition=Ready cluster.postgresql.cnpg.io/shop-db cluster.postgresql.cnpg.io/keycloak-db -n shop --timeout=300s
 	$(KUBECTL) -n shop rollout status deploy/valkey --timeout=300s
 	$(KUBECTL) -n shop rollout status deploy/mailpit --timeout=300s
@@ -373,6 +381,7 @@ cluster-smoke:
 	done
 
 cluster-e2e: secrets e2e-deps k8s-tools cache-dirs ## Playwright, NetworkPolicy and PDB tests against the kind cluster, with an HPA replica report (run make cluster-up deploy first)
+	@$(loadtest_refuse_live_minting)
 	rm -rf $(CLUSTER_REPORT_DIR)
 	mkdir -p $(CLUSTER_REPORT_DIR)
 	@status=0; \
@@ -410,8 +419,8 @@ cluster-traffic: ## Request /api/status every 100 ms through the gateway and pri
 			sleep 0.1; \
 		done'
 
-k8s-lint: cache-dirs
-	for overlay in local obs; do \
+k8s-lint: cache-dirs k8s-loadtest-guard
+	for overlay in $(K8S_OVERLAYS); do \
 		docker run --rm --user $(HOST_UID):$(HOST_GID) -v $(CURDIR)/deploy:/deploy:ro $(KUBECTL_IMAGE) kustomize /deploy/k8s/overlays/$$overlay \
 			| docker run --rm -i --user $(HOST_UID):$(HOST_GID) -v $(CACHE_DIR)/kubeconform:/cache $(KUBECONFORM_IMAGE) $(KUBECONFORM_ARGS) - || exit 1; \
 	done

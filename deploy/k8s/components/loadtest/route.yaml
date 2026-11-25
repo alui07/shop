@@ -1,0 +1,19 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: loadtest
+  labels:
+    app.kubernetes.io/part-of: shop
+spec:
+  parentRefs:
+    - name: shop
+      sectionName: loadtest
+  rules:
+    - matches:
+        - method: POST
+          path:
+            type: Exact
+            value: /api/loadtest/sessions
+      backendRefs:
+        - name: api
+          port: 8080
