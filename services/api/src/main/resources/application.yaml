@@ -9,7 +9,7 @@ spring:
       maximum-pool-size: 15
       minimum-idle: 5
       data-source-properties:
-        options: "-c lock_timeout=3s"
+        options: "-c lock_timeout=3s -c statement_timeout=5s"
   flyway:
     ignore-migration-patterns: "*:future,repeatable:missing"
     connect-retries: 12
@@ -69,10 +69,16 @@ shop:
     webhook-secret: ${SHOP_PAYMENT_WEBHOOK_SECRET:}
   mail:
     from: orders@shop.test
+  rate-limit:
+    enabled: true
+    scale: ${SHOP_RATE_LIMIT_SCALE:1}
 
 server:
   port: 8080
   shutdown: graceful
+  # Tomcat's RemoteIpValve trusts Boot's default internal-proxies (private ranges). That is only safe where the proxy
+  # in front replaces X-Forwarded-For: the kind manifests (deploy/k8s/base/api.yaml) narrow it with
+  # SERVER_TOMCAT_REMOTEIP_INTERNAL_PROXIES and Envoy removes client-sent forwarding headers; the compose e2e nginx overwrites the header.
   forward-headers-strategy: native
   tomcat:
     max-http-form-post-size: 16KB

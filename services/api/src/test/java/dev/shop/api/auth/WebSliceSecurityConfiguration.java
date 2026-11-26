@@ -25,6 +25,16 @@ public class WebSliceSecurityConfiguration {
     }
 
     @Bean
+    RateLimiter rateLimiter() {
+        return mock(RateLimiter.class);
+    }
+
+    @Bean
+    RateLimitProperties rateLimitProperties() {
+        return new RateLimitProperties(false, 1);
+    }
+
+    @Bean
     StringRedisTemplate stringRedisTemplate() {
         return mock(StringRedisTemplate.class);
     }

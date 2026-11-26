@@ -8,6 +8,7 @@ import {
   type ProductFormValues,
   type StockFormValues,
 } from '@/lib/adminSchemas';
+import { tooManyAttemptsMessage } from '@/lib/failureMessage';
 import type { Problem } from '@/lib/problem';
 
 type AdminProduct = components['schemas']['AdminProduct'];
@@ -94,12 +95,13 @@ export interface SubmitErrors {
 
 /** Places server messages under the fields the form shows; anything else goes to the form-level alert. */
 export function toSubmitErrors(
-  failure: { status: number; problem: Problem },
+  failure: { status: number; problem: Problem; retryAfterSeconds?: number },
   serverFields: Record<string, string>,
 ): SubmitErrors {
-  const { status, problem } = failure;
+  const { status, problem, retryAfterSeconds } = failure;
   if (problem.type === VERSION_CONFLICT_TYPE) return { form: CONFLICT_MESSAGE, fields: {} };
   if (problem.type !== VALIDATION_TYPE && problem.type !== DUPLICATE_SLUG_TYPE) {
+    if (status === 429) return { form: tooManyAttemptsMessage(retryAfterSeconds), fields: {} };
     // The API's 503 details are fixed server texts, so they are safe to show.
     const serverText = status === 503 ? problem.detail : undefined;
     return { form: serverText ?? FAILURE_MESSAGES[status] ?? DEFAULT_FAILURE_MESSAGE, fields: {} };

@@ -16,7 +16,7 @@ import {
 } from '../lib/config.js';
 import { freshSession, mintSessions } from '../lib/session.js';
 import { browseVisit, checkout, classifyConflict, discoverCatalog, payAndAwait, putCartLine } from '../lib/shop.js';
-import { jsonBody, statusIs, summaryOutputs, trendStats } from '../lib/checks.js';
+import { jsonBody, rateLimitThreshold, statusIs, summaryOutputs, trendStats } from '../lib/checks.js';
 
 const created = new Counter('flash_orders_created');
 const paid = new Counter('flash_orders_paid');
@@ -50,6 +50,7 @@ export const options = {
     },
     summaryTrendStats: trendStats,
     thresholds: {
+        ...rateLimitThreshold,
         flash_orders_created: [`count<=${FLASH_UNITS}`],
         flash_orders_paid: [`count<=${FLASH_UNITS}`],
         'http_req_failed{load:shop}': ['rate<0.01'],

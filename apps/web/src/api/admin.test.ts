@@ -1,5 +1,6 @@
 import { QueryClient } from '@tanstack/react-query';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { toSubmitErrors } from '@/lib/adminForms';
 import { adminProduct } from '@/test/fixtures';
 import { jsonResponse, stubFetch } from '@/test/fetchStub';
 import { apiClient } from './client';
@@ -67,6 +68,23 @@ describe('writes', () => {
     expect((failure as AdminProblemError).problem.errors).toEqual([
       { field: 'name', message: 'blank' },
     ]);
+  });
+
+  it('carry Retry-After of a 429 into the form message', async () => {
+    stubFetch({
+      '/api/admin/products/7': () =>
+        new Response(JSON.stringify({ type: 'tag:shop.dev,2026:rate-limited', errors: [] }), {
+          status: 429,
+          headers: { 'Content-Type': 'application/problem+json', 'Retry-After': '7' },
+        }),
+    });
+
+    const failure = (await updateProduct(7, body).catch(
+      (error: unknown) => error,
+    )) as AdminProblemError;
+
+    expect(failure.retryAfterSeconds).toBe(7);
+    expect(toSubmitErrors(failure, {}).form).toBe('Too many attempts. Try again in 7 seconds.');
   });
 
   it('throw an empty problem for an unreadable body', async () => {

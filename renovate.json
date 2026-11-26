@@ -20,7 +20,7 @@
     },
     {
       "description": "The observability stack charts and images are checked together by make obs-up",
-      "matchPackageNames": ["prometheus", "grafana", "tempo", "loki", "opentelemetry-collector", "otel/opentelemetry-collector-k8s", "grafana/otel-lgtm"],
+      "matchPackageNames": ["prometheus", "grafana", "tempo", "loki", "opentelemetry-collector", "otel/opentelemetry-collector-k8s", "grafana/otel-lgtm", "prom/prometheus"],
       "groupName": "observability stack"
     },
     {

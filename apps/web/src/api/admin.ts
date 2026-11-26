@@ -4,6 +4,7 @@ import { problemSchema, type Problem } from '@/lib/problem';
 import type { components } from './schema';
 import { unwrap } from './catalog';
 import { apiClient } from './client';
+import { parseRetryAfter } from './problemError';
 
 type AdminProduct = components['schemas']['AdminProduct'];
 type ProductInput = components['schemas']['ProductInput'];
@@ -14,12 +15,15 @@ type StockInput = components['schemas']['StockInput'];
 export class AdminProblemError extends Error {
   readonly status: number;
   readonly problem: Problem;
+  /** Seconds from a delta-seconds `Retry-After` header; absent for an HTTP-date or invalid value. */
+  readonly retryAfterSeconds?: number;
 
-  constructor(status: number, problem: Problem) {
+  constructor(status: number, problem: Problem, retryAfterSeconds?: number) {
     super(`Admin request failed with status ${status}`);
     this.name = 'AdminProblemError';
     this.status = status;
     this.problem = problem;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -76,6 +80,7 @@ async function send(
     throw new AdminProblemError(
       result.response.status,
       parsed.success ? parsed.data : { errors: [] },
+      parseRetryAfter(result.response.headers.get('Retry-After')),
     );
   }
   return result.data;

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Fails when a metric the dashboard (dashboards/shop-api.json) queries is missing from Prometheus.
+# Fails when a metric the dashboards (dashboards/*.json) queries is missing from Prometheus.
 # This file is the single list of those names: OTLP-to-Prometheus name translation is the likely source of a mismatch.
 #
 #   check-metrics.sh kind          cluster Prometheus through the API server's service proxy (run from the k8s tools container)
@@ -22,10 +22,19 @@ executor_active_threads
 executor_queued_tasks
 shop_events_dead_letter_rows
 shop_reservations_released_units_total
+shop_rate_limit_rejected_total
 tasks_scheduled_execution_seconds_count
 jvm_memory_used_bytes
 process_cpu_usage
 target_info
+'
+# The selectors, with label matchers, the alert rules in alerts/shop.rules.yaml query: a renamed label would silence an alert while promtool still passes.
+# The outcome!="SUCCESS" series exists only after a failed run, so it is not asserted.
+alert_selectors='
+shop_events_dead_letter_rows{job="shop-api"}
+shop_reservations_overdue{job="shop-api"}
+tasks_scheduled_execution_seconds_count{job="shop-api",code_function="runOnce",code_namespace=~".*ReservationExpiryJob",outcome="SUCCESS"}
+shop_rate_limit_backend_failures_total{job="shop-api"}
 '
 # Only the kind Prometheus scrapes the kubelet's cAdvisor endpoint.
 kind_only_metrics='container_cpu_cfs_throttled_periods_total'
@@ -61,6 +70,7 @@ selectors() {
       *) echo "$name{job=\"shop-api\"}" ;;
     esac
   done
+  for selector in $alert_selectors; do echo "$selector"; done
   # A finite bucket proves percentiles-histogram is on; with only le="+Inf" histogram_quantile returns NaN and the latency panel is empty.
   echo "http_server_requests_seconds_bucket{job=\"shop-api\",le!=\"+Inf\"}"
   if [ "$target" = kind ]; then

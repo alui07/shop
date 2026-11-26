@@ -71,6 +71,9 @@ spec:
                 secretKeyRef:
                   name: shop-payment
                   key: SHOP_PAYMENT_WEBHOOK_SECRET
+            # Trust X-Forwarded-For only from the pod network (Envoy); Boot's default also trusts the node and Docker ranges.
+            - name: SERVER_TOMCAT_REMOTEIP_INTERNAL_PROXIES
+              value: 10.244.0.0/16
             - name: JAVA_TOOL_OPTIONS
               value: -XX:MaxRAMPercentage=70 -XX:+ExitOnOutOfMemoryError
           resources:

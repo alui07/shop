@@ -22,7 +22,7 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import tools.jackson.databind.JsonNode;
 
-/** Customer request bodies are capped at 16 KiB, declared or streamed; admin bodies keep their own bounds. */
+/** Customer request bodies are capped at 16 KiB and admin bodies at 32 KiB, declared or streamed. */
 class BodyLimitIT extends ShopIT {
 
     private static final int LIMIT = 16 * 1024;
@@ -92,15 +92,35 @@ class BodyLimitIT extends ShopIT {
     }
 
     @Test
-    void adminBodiesAreNotCapped() {
+    void adminBodiesAreCappedAtThirtyTwoKibDeclaredOrStreamed() {
         TestBrowser browser = signedInAs(Identity.admin());
         browser.get("/api/me");
-        String body = "{\"slug\":\"x\",\"pad\":\"" + "a".repeat(2 * LIMIT) + "\"}";
+        int adminLimit = 32 * 1024;
 
-        HttpResponse<String> response = send(browser, "POST", "/api/admin/products", body, false);
+        HttpResponse<String> overCustomerLimit =
+                send(browser, "POST", "/api/admin/products", padded("{}", LIMIT + 1), false);
+        HttpResponse<String> atLimit = send(browser, "POST", "/api/admin/products", padded("{}", adminLimit), true);
+        HttpResponse<String> declaredOver =
+                send(browser, "POST", "/api/admin/products", padded("{}", adminLimit + 1), false);
+        HttpResponse<String> streamedOver =
+                send(browser, "POST", "/api/admin/products", padded("{}", adminLimit + 1), true);
 
-        assertThat(response.statusCode()).isEqualTo(400);
-        assertThat(AdminClient.json(response).get("type").asString()).isEqualTo("tag:shop.dev,2026:validation");
+        assertThat(overCustomerLimit.statusCode()).as(overCustomerLimit.body()).isEqualTo(400);
+        assertThat(AdminClient.json(overCustomerLimit).get("type").asString())
+                .isEqualTo("tag:shop.dev,2026:validation");
+        assertThat(atLimit.statusCode()).as(atLimit.body()).isEqualTo(400);
+        assertTooLarge(declaredOver);
+        assertTooLarge(streamedOver);
+    }
+
+    @Test
+    void aPercentEncodedAdminPathKeepsTheStricterCustomerCap() {
+        TestBrowser browser = signedInAs(Identity.admin());
+        browser.get("/api/me");
+
+        HttpResponse<String> response = send(browser, "POST", "/api/%61dmin/products", padded("{}", LIMIT + 1), false);
+
+        assertTooLarge(response);
     }
 
     @Test

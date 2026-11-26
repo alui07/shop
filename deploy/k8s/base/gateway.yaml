@@ -136,3 +136,14 @@ spec:
   clientIPDetection:
     xForwardedFor:
       numTrustedHops: 0
+  headers:
+    # Removed before Envoy appends the peer, so upstreams see exactly one X-Forwarded-For entry, the real peer.
+    earlyRequestHeaders:
+      remove:
+        - X-Forwarded-For
+        - X-Real-IP
+        - Forwarded
+        - x-envoy-original-path
+        - X-Forwarded-Port
+        - X-Forwarded-Prefix
+    disableRateLimitHeaders: true

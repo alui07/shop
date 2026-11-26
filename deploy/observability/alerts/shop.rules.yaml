@@ -1,0 +1,44 @@
+# Source of truth for the kind Prometheus alert rules (make obs-up turns this file into chart values). Tested by shop.rules.test.yaml (make prom-lint).
+groups:
+  - name: shop
+    rules:
+      - alert: ShopEventsDeadLettered
+        expr: max(shop_events_dead_letter_rows{job="shop-api"}) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Events are dead-lettered
+          description: "{{ $value }} dead-lettered event rows. Resubmit them as described in the README (dead-letter resubmission)."
+      - alert: ShopReservationExpiryNotRunning
+        expr: (sum(increase(tasks_scheduled_execution_seconds_count{job="shop-api",code_function="runOnce",code_namespace=~".*ReservationExpiryJob",outcome="SUCCESS"}[5m])) or vector(0)) == 0 and on() count(target_info{job="shop-api"}) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: The reservation expiry job has not succeeded for 5 minutes
+          description: Expired reservations are not released while the API is up. Check the API logs for ReservationExpiryJob.
+      - alert: ShopReservationExpiryFailing
+        expr: sum(increase(tasks_scheduled_execution_seconds_count{job="shop-api",code_function="runOnce",code_namespace=~".*ReservationExpiryJob",outcome!="SUCCESS"}[10m])) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: The reservation expiry job is failing
+          description: Runs of ReservationExpiryJob ended in an error within the last 10 minutes.
+      - alert: ShopReservationsOverdue
+        expr: max(shop_reservations_overdue{job="shop-api"}) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Reservations are overdue for release
+          description: "{{ $value }} active reservations expired more than 2 minutes ago and are still held."
+      - alert: ShopRateLimitBackendFailing
+        expr: sum(increase(shop_rate_limit_backend_failures_total{job="shop-api"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: The API rate limiter cannot reach Valkey
+          description: Per-account limits are failing open; only the per-IP Envoy limits and per-account caps apply.

@@ -41,6 +41,7 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ApiExceptionHandler.class);
     private static final String LOCK_RETRY_AFTER_SECONDS = "3";
+    private static final String STATEMENT_TIMEOUT_RETRY_AFTER_SECONDS = "5";
 
     @ExceptionHandler(InvalidParameterException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
@@ -147,6 +148,16 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
                     .header(HttpHeaders.RETRY_AFTER, LOCK_RETRY_AFTER_SECONDS)
                     .body(ProblemDetail.forStatusAndDetail(
                             HttpStatus.SERVICE_UNAVAILABLE, "The product is busy; try again shortly"));
+        }
+        if (LockFailures.isStatementTimeout(exception)) {
+            LOGGER.warn(
+                    "A statement was cancelled (statement_timeout or a cancel request): {}, SQLState {}",
+                    exception.getClass().getName(),
+                    LockFailures.firstSqlException(exception).getSQLState());
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .header(HttpHeaders.RETRY_AFTER, STATEMENT_TIMEOUT_RETRY_AFTER_SECONDS)
+                    .body(ProblemDetail.forStatusAndDetail(
+                            HttpStatus.SERVICE_UNAVAILABLE, "The request took too long; try again shortly"));
         }
         SQLException sql = LockFailures.firstSqlException(exception);
         if (sql != null) {

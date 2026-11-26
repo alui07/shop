@@ -17,10 +17,15 @@ OTEL_COLLECTOR_DIGEST = sha256:$(lastword $(subst :, ,$(OTEL_COLLECTOR_IMAGE)))
 # NetworkPolicies only overlays/obs (and overlays built on it) add; make deploy deletes each one the rendered overlay lacks, because server-side apply never removes objects.
 OBS_ONLY_NETWORK_POLICIES := api-to-otel-collector
 
+ALERT_RULES_DIR := deploy/observability/alerts
+# Generated from shop.rules.yaml: the chart renders serverFiles with toYaml, so the rule file must arrive as structured values, not as a string.
+ALERT_VALUES_FILE := build/obs/prometheus-alerts-values.yaml
+PROMETHEUS_ALERTS_HASH = $(shell cat $(ALERT_RULES_DIR)/shop.rules.yaml | sha256sum | cut -c1-32)
+
 # Rolls the Grafana pod when its admin password changes; the chart reads the Secret only at start. Expanded after `secrets` has run.
 GRAFANA_ADMIN_PASSWORD_HASH = $(shell grep '^GRAFANA_ADMIN_PASSWORD=' $(SECRETS_FILE) | sha256sum | cut -c1-32)
 
-.PHONY: obs-up obs-down obs-check obs-check-dev obs-memory
+.PHONY: obs-up obs-down obs-check obs-check-dev obs-memory obs-alerts prom-lint
 
 obs-up: secrets k8s-tools cache-dirs ## Install Prometheus, Loki, Tempo, an OpenTelemetry Collector and Grafana in kind (needs make cluster-up); http://grafana.localhost:8088
 	@if [ -z "$$(docker ps -q --filter $(KIND_LABEL))" ]; then echo "run make cluster-up first" >&2; exit 1; fi
@@ -33,7 +38,8 @@ obs-up: secrets k8s-tools cache-dirs ## Install Prometheus, Loki, Tempo, an Open
 		| $(K8S_DOCKER) $(K8S_TOOLS_IMAGE) kubectl apply --server-side --field-manager=shop-deploy -f - > /dev/null
 	@$(call helm_release,loki,$(OBS_NAMESPACE),loki-$(LOKI_CHART_VERSION),loki --repo https://grafana.github.io/helm-charts --version $(LOKI_CHART_VERSION),deploy/observability/loki-values.yaml)
 	@$(call helm_release,tempo,$(OBS_NAMESPACE),tempo-$(TEMPO_CHART_VERSION),tempo --repo https://grafana-community.github.io/helm-charts --version $(TEMPO_CHART_VERSION),deploy/observability/tempo-values.yaml)
-	@$(call helm_release,prometheus,$(OBS_NAMESPACE),prometheus-$(PROMETHEUS_CHART_VERSION),prometheus --repo https://prometheus-community.github.io/helm-charts --version $(PROMETHEUS_CHART_VERSION),deploy/observability/prometheus-values.yaml)
+	@mkdir -p build/obs && { printf 'serverFiles:\n  alerting_rules.yml:\n'; sed 's/^/    /' $(ALERT_RULES_DIR)/shop.rules.yaml; } > $(ALERT_VALUES_FILE)
+	@$(call helm_release,prometheus,$(OBS_NAMESPACE),prometheus-$(PROMETHEUS_CHART_VERSION),prometheus --repo https://prometheus-community.github.io/helm-charts --version $(PROMETHEUS_CHART_VERSION) -f $(ALERT_VALUES_FILE),deploy/observability/prometheus-values.yaml,$(PROMETHEUS_ALERTS_HASH))
 	@$(call helm_release,otel-collector,$(OBS_NAMESPACE),opentelemetry-collector-$(OTEL_COLLECTOR_CHART_VERSION),opentelemetry-collector --repo https://open-telemetry.github.io/opentelemetry-helm-charts --version $(OTEL_COLLECTOR_CHART_VERSION) --set image.repository=$(OTEL_COLLECTOR_REPOSITORY) --set image.digest=$(OTEL_COLLECTOR_DIGEST),deploy/observability/collector-values.yaml,$(OTEL_COLLECTOR_IMAGE))
 	@$(call helm_release,grafana,$(OBS_NAMESPACE),grafana-$(GRAFANA_CHART_VERSION),grafana --repo https://grafana-community.github.io/helm-charts --version $(GRAFANA_CHART_VERSION) --set-string podAnnotations.checksum/admin-password=$(GRAFANA_ADMIN_PASSWORD_HASH),deploy/observability/grafana-values.yaml,$(GRAFANA_ADMIN_PASSWORD_HASH))
 	$(KUBECTL) apply --server-side --field-manager=shop-deploy -f deploy/observability/grafana-route.yaml
@@ -63,3 +69,15 @@ obs-check: ## Every metric the dashboard uses is in the kind Prometheus (deploy 
 
 obs-check-dev: ## Every metric the dashboard uses is in otel-lgtm's Prometheus (after make dev OBS=1)
 	docker run --rm --network shop_default -v $(CURDIR)/deploy/observability:/obs:ro $(ALPINE_IMAGE) sh /obs/check-metrics.sh http://otel-lgtm:9090
+
+prom-lint: ## promtool check and unit-test the alert rules in deploy/observability/alerts
+	docker run --rm --user $(HOST_UID):$(HOST_GID) --entrypoint promtool -v $(CURDIR)/$(ALERT_RULES_DIR):/alerts:ro -w /alerts $(PROMETHEUS_IMAGE) check rules shop.rules.yaml
+	docker run --rm --user $(HOST_UID):$(HOST_GID) --entrypoint promtool -v $(CURDIR)/$(ALERT_RULES_DIR):/alerts:ro -w /alerts $(PROMETHEUS_IMAGE) test rules shop.rules.test.yaml
+
+obs-alerts: ## Print the alerts the kind Prometheus is evaluating: state, name, since (after make obs-up)
+	@response=$$($(KUBECTL) get --raw "/api/v1/namespaces/$(OBS_NAMESPACE)/services/prometheus-server:80/proxy/api/v1/alerts") \
+		|| { echo "obs-alerts: could not fetch the alerts from Prometheus (is the obs stack up? make obs-up)" >&2; exit 1; }; \
+	case "$$response" in *'"status":"success"'*) ;; *) echo "obs-alerts: Prometheus did not answer with status success" >&2; exit 1;; esac; \
+	alerts=$$(printf '%s' "$$response" | $(K8S_DOCKER) -i $(ALPINE_IMAGE) sh -c 'sed -e "s/},{\"labels\"/}\n{\"labels\"/g" | sed -n "s/.*\"alertname\":\"\([^\"]*\)\".*\"state\":\"\([a-z]*\)\",\"activeAt\":\"\([^\"]*\)\".*/\2 \1 since \3/p"') \
+		|| { echo "obs-alerts: could not parse the Prometheus response" >&2; exit 1; }; \
+	if [ -n "$$alerts" ]; then printf '%s\n' "$$alerts"; else echo "no pending or firing alerts"; fi

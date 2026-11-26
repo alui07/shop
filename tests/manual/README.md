@@ -208,6 +208,16 @@ Run these on `make dev` (http://localhost:5173, Mailpit on http://localhost:8025
   - Steps: run `make cluster-e2e` after `make loadtest` or `make loadtest-cache`. If count-based specs fail on the leftover `loadtest` category or products, `make cluster-down cluster-up deploy`.
   - Expected: `cluster-e2e` passes; seeded stock is unchanged.
 
+## Limits and alerting (slice 5c)
+
+- [ ] **A dead-letter row fires the alert, then clears**
+  - Why manual: `promtool` tests the rule against made-up series, and `obs-check` proves the series exist; only a live run shows the rule file loaded, the gauge changing and the alert moving through pending to firing in the real Prometheus. Alertmanager is off, so the alert is visible only in Prometheus and Grafana.
+  - Steps: `make cluster-up deploy` if needed, then `make obs-up deploy OVERLAY=obs` and wait for the API pods. Insert one row into the dead-letter table (columns from `V10__event_publication.sql`; `shop-db-1` is the CNPG primary, check with `make kubectl ARGS="-n shop get pods -l cnpg.io/instanceRole=primary"`):
+    `make kubectl ARGS="-n shop exec shop-db-1 -c postgres -- psql -U postgres -d shop -c \"INSERT INTO event_publication_dead_letter (id, listener_id, event_type, serialized_event, publication_date, moved_at) VALUES ('00000000-0000-0000-0000-00000000a1e7', 'manual-alert-check', 'manual.AlertCheck', '{}', now(), now())\""`
+    Run `make obs-alerts` every minute. Also watch the Alerts panel on the "Shop limits and alerts" dashboard at http://grafana.localhost:8088. When done, delete the row:
+    `make kubectl ARGS="-n shop exec shop-db-1 -c postgres -- psql -U postgres -d shop -c \"DELETE FROM event_publication_dead_letter WHERE id = '00000000-0000-0000-0000-00000000a1e7'\""`
+  - Expected: within about 30 s (the gauge is cached for one export step) the dashboard's dead-letter panel shows 1; `make obs-alerts` (which prints `no pending or firing alerts` when there are none, and exits non-zero with a message if Prometheus cannot be reached or does not answer with `status: success`) prints `pending ShopEventsDeadLettered since <time>`, and after the 5 minute `for` plus up to one evaluation interval (1 minute) it prints `firing ShopEventsDeadLettered since <time>`. A minute or two after the delete `make obs-alerts` prints `no pending or firing alerts` again and the panel returns to 0. Leave no row behind: if the delete fails, repeat it before the next `make cluster-e2e`.
+
 ## After the first push to GitHub
 
 - [ ] **Pull request workflow is green on a Linux runner**

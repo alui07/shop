@@ -1,7 +1,19 @@
 import { check } from 'k6';
+import { Counter } from 'k6/metrics';
 import { TREND_STATS } from './config.js';
 
 export const trendStats = TREND_STATS;
+
+export const rateLimited = new Counter('rate_limited');
+
+/** Merge into every scenario's thresholds: a 429 means the overlay did not raise the limits, so the run is void. */
+export const rateLimitThreshold = { rate_limited: ['count==0'] };
+
+/** Counts a 429 from any request made outside setup() (setup traffic carries load:setup); returns the response. */
+export function countRateLimit(res, load) {
+    if (res.status === 429 && load !== 'setup') rateLimited.add(1);
+    return res;
+}
 
 export function statusIs(res, name, ...statuses) {
     return check(res, { [`${name} status ${statuses.join('/')}`]: (r) => statuses.includes(r.status) });

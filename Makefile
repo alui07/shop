@@ -151,7 +151,7 @@ api-stop: secrets ## Stop the API in the dev stack (to see the unavailable state
 api-start: secrets ## Start the API in the dev stack again
 	$(COMPOSE) start api
 
-lint: api-lint web-lint e2e-lint e2e-version-lock docker-lint workflow-lint compose-lint k8s-lint loadtest-lint ## Spotless, ESLint, tsc, Prettier, hadolint, actionlint, zizmor, compose config, kubeconform, k6 inspect
+lint: api-lint web-lint e2e-lint e2e-version-lock docker-lint workflow-lint compose-lint k8s-lint loadtest-lint prom-lint ## Spotless, ESLint, tsc, Prettier, hadolint, actionlint, zizmor, compose config, kubeconform, k6 inspect
 
 test: api-test web-test ## Unit and integration tests for both apps; fails below 100% coverage
 
@@ -399,6 +399,9 @@ cluster-e2e: secrets e2e-deps k8s-tools cache-dirs ## Playwright, NetworkPolicy 
 	docker rm -f shop-hpa-sampler >/dev/null 2>&1 || true; \
 	{ $(K8S_RUN) sh deploy/k8s-tools/hpa-report.sh summary /reports/hpa-samples.csv 2>&1 | tee $(CLUSTER_REPORT_DIR)/hpa.log; } || status=1; \
 	{ $(K8S_RUN) sh tests/e2e/cluster/pdb-test.sh 2>&1 | tee $(CLUSTER_REPORT_DIR)/pdb.log; } || status=1; \
+	limits_start=$$(date -u +%Y-%m-%dT%H:%M:%SZ); \
+	{ docker run --rm --init --network kind --user $(HOST_UID):$(HOST_GID) -e HOME=/tmp -v $(CURDIR)/tests/e2e:/e2e:ro $(K6_IMAGE) run /e2e/cluster/limits-test.js 2>&1 | tee $(CLUSTER_REPORT_DIR)/limits.log; } || status=1; \
+	{ $(K8S_RUN) sh tests/e2e/cluster/limits-access-log-test.sh "$$limits_start" /reports/limits.log 2>&1 | tee $(CLUSTER_REPORT_DIR)/limits-access-log.log; } || status=1; \
 	if [ $$status -ne 0 ]; then $(MAKE) --no-print-directory cluster-diagnostics; fi; \
 	exit $$status
 
@@ -419,7 +422,7 @@ cluster-traffic: ## Request /api/status every 100 ms through the gateway and pri
 			sleep 0.1; \
 		done'
 
-k8s-lint: cache-dirs k8s-loadtest-guard
+k8s-lint: cache-dirs k8s-loadtest-guard k8s-rate-limit-guard
 	for overlay in $(K8S_OVERLAYS); do \
 		docker run --rm --user $(HOST_UID):$(HOST_GID) -v $(CURDIR)/deploy:/deploy:ro $(KUBECTL_IMAGE) kustomize /deploy/k8s/overlays/$$overlay \
 			| docker run --rm -i --user $(HOST_UID):$(HOST_GID) -v $(CACHE_DIR)/kubeconform:/cache $(KUBECONFORM_IMAGE) $(KUBECONFORM_ARGS) - || exit 1; \

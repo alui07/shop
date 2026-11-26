@@ -23,12 +23,13 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * Caps customer request bodies. A declared length over the limit is refused before anything is read; a body with no
  * declared length (chunked) is counted as it is read and fails at one byte over. A body that is not JSON is refused
- * with 415 before it is read. Admin bodies keep their own bounds, and the payment webhook, which enforces its own
- * larger limit, is skipped by exact method and path: any other spelling of the path stays under this cap.
+ * with 415 before it is read. Admin bodies get a larger cap, and the payment webhook, which enforces its own larger
+ * limit, is skipped by exact method and path: any other spelling of the path stays under this cap.
  */
 final class RequestBodyLimitFilter extends OncePerRequestFilter {
 
     static final int LIMIT_BYTES = 16 * 1024;
+    static final int ADMIN_LIMIT_BYTES = 32 * 1024;
 
     private static final String API_PREFIX = "/api/";
     private static final String ADMIN_PREFIX = "/api/admin/";
@@ -44,14 +45,14 @@ final class RequestBodyLimitFilter extends OncePerRequestFilter {
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI();
         return !path.startsWith(API_PREFIX)
-                || path.startsWith(ADMIN_PREFIX)
                 || (HttpMethod.POST.matches(request.getMethod()) && WEBHOOK_PATH.equals(path));
     }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        if (request.getContentLengthLong() > LIMIT_BYTES) {
+        int limit = limitFor(request);
+        if (request.getContentLengthLong() > limit) {
             refuse(response, tooLarge());
             return;
         }
@@ -59,7 +60,11 @@ final class RequestBodyLimitFilter extends OncePerRequestFilter {
             refuse(response, unsupportedMediaType());
             return;
         }
-        chain.doFilter(new LimitedRequest(request), response);
+        chain.doFilter(new LimitedRequest(request, limit), response);
+    }
+
+    private static int limitFor(HttpServletRequest request) {
+        return request.getRequestURI().startsWith(ADMIN_PREFIX) ? ADMIN_LIMIT_BYTES : LIMIT_BYTES;
     }
 
     /** Form bodies would otherwise be parsed by the servlet container, outside the counted stream. */
@@ -110,16 +115,18 @@ final class RequestBodyLimitFilter extends OncePerRequestFilter {
 
     private static final class LimitedRequest extends HttpServletRequestWrapper {
 
+        private final int limit;
         private ServletInputStream limited;
 
-        LimitedRequest(HttpServletRequest request) {
+        LimitedRequest(HttpServletRequest request, int limit) {
             super(request);
+            this.limit = limit;
         }
 
         @Override
         public ServletInputStream getInputStream() throws IOException {
             if (limited == null) {
-                limited = new LimitedStream(super.getInputStream());
+                limited = new LimitedStream(super.getInputStream(), limit);
             }
             return limited;
         }
@@ -128,10 +135,12 @@ final class RequestBodyLimitFilter extends OncePerRequestFilter {
     private static final class LimitedStream extends ServletInputStream {
 
         private final ServletInputStream delegate;
+        private final int limit;
         private long consumed;
 
-        LimitedStream(ServletInputStream delegate) {
+        LimitedStream(ServletInputStream delegate, int limit) {
             this.delegate = delegate;
+            this.limit = limit;
         }
 
         @Override
@@ -154,7 +163,7 @@ final class RequestBodyLimitFilter extends OncePerRequestFilter {
 
         private void count(int bytes) throws IOException {
             consumed += bytes;
-            if (consumed > LIMIT_BYTES) {
+            if (consumed > limit) {
                 throw new BodyTooLargeException();
             }
         }

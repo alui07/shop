@@ -22,6 +22,24 @@ describe('failureMessage', () => {
     ).toBe('Busy, retry');
   });
 
+  it('tells how long to wait after a 429', () => {
+    expect(failureMessage(new ProblemError(429, { errors: [] }, 12), FALLBACK)).toBe(
+      'Too many attempts. Try again in 12 seconds.',
+    );
+  });
+
+  it('uses the singular for a 1 second wait', () => {
+    expect(failureMessage(new ProblemError(429, { errors: [] }, 1), FALLBACK)).toBe(
+      'Too many attempts. Try again in 1 second.',
+    );
+  });
+
+  it('tells to wait a moment after a 429 without a valid Retry-After', () => {
+    expect(failureMessage(new ProblemError(429, { errors: [] }), FALLBACK)).toBe(
+      'Too many attempts. Try again in a moment.',
+    );
+  });
+
   it('explains an order that is still being processed', () => {
     expect(
       failureMessage(new ProblemError(409, { type: IN_PROGRESS_TYPE, errors: [] }), FALLBACK),

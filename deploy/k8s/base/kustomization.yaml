@@ -12,5 +12,6 @@ resources:
   - valkey.yaml
   - keycloak.yaml
   - gateway.yaml
+  - limits.yaml
   - network-policies.yaml
   - network-policies-auth.yaml

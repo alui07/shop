@@ -55,8 +55,8 @@ Slice 3a shipped sign-in, roles and a read-only admin product list. Slice 3b let
 
 - Admin writes need Valkey (session) and Keycloak (revalidation) to be reachable and fresh; the public catalog does not.
 - A demoted admin can write for up to 5 minutes while Keycloak is up; with Keycloak down, writes stop 5 minutes after the last success.
-- The audit log grows without bound (no rate limit before slice 5c) and has no export or filter. A future export must neutralise CSV formula prefixes (`=`, `+`, `-`, `@`, tab, CR).
-- Admin request bodies are bounded only by Jackson's string limit until slice 5c's gateway limits.
+- The audit log growth is bounded by the `admin-writes` rule from slice 5c (60 a minute and 600 an hour per account, ADR 0013), and it has no export or filter. A future export must neutralise CSV formula prefixes (`=`, `+`, `-`, `@`, tab, CR).
+- Admin request bodies are capped at 32 KiB by `RequestBodyLimitFilter` (413 before authentication) and at 64 KiB by Envoy's request buffer since slice 5c. Deep audit pages are not rate limited per account (`statement_timeout` of 5 s bounds each query, not concurrency, R34).
 - Slice 4 inherits the stock contract above and must not weaken it.
 - Residual risks are R21 to R31 in `docs/threat-model.md`.
 

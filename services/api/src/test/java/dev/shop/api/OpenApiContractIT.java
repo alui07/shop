@@ -79,6 +79,36 @@ class OpenApiContractIT {
         assertThat(liveDocument().get("paths").propertyNames()).noneMatch(path -> path.startsWith("/api/loadtest"));
     }
 
+    @Test
+    void exactlyTheRateLimitedOperationsDeclareTheTooManyRequestsProblem() {
+        JsonNode paths = liveDocument().get("paths");
+        java.util.Set<String> limited = new java.util.TreeSet<>();
+        for (String path : paths.propertyNames()) {
+            for (String method : paths.get(path).propertyNames()) {
+                JsonNode response = paths.get(path).get(method).get("responses").get("429");
+                if (response != null) {
+                    limited.add(method.toUpperCase() + " " + path);
+                    assertThat(response.get("content")
+                                    .get("application/problem+json")
+                                    .get("schema")
+                                    .get("$ref")
+                                    .asString())
+                            .isEqualTo("#/components/schemas/ProblemDetail");
+                }
+            }
+        }
+
+        assertThat(limited)
+                .contains(
+                        "POST /api/checkout",
+                        "POST /api/orders/{id}/payment",
+                        "POST /api/orders/{id}/cancel",
+                        "PUT /api/cart/lines/{slug}",
+                        "DELETE /api/cart/lines/{slug}",
+                        "POST /api/admin/products")
+                .noneMatch(operation -> operation.startsWith("GET "));
+    }
+
     private ObjectNode liveDocument() {
         ObjectNode document =
                 (ObjectNode) JSON.readTree(get(port, "/v3/api-docs").body());

@@ -122,6 +122,19 @@ describe('toSubmitErrors', () => {
     },
   );
 
+  it('tells how long to wait after a 429', () => {
+    expect(
+      toSubmitErrors({ status: 429, problem: problem(undefined), retryAfterSeconds: 9 }, {}),
+    ).toEqual({ form: 'Too many attempts. Try again in 9 seconds.', fields: {} });
+  });
+
+  it('tells to wait a moment after a 429 without Retry-After', () => {
+    expect(toSubmitErrors({ status: 429, problem: problem(undefined) }, {})).toEqual({
+      form: 'Too many attempts. Try again in a moment.',
+      fields: {},
+    });
+  });
+
   it('ignores a detail on other statuses', () => {
     expect(toSubmitErrors({ status: 500, problem: { detail: 'secret', errors: [] } }, {})).toEqual({
       form: 'The change could not be saved. Try again.',

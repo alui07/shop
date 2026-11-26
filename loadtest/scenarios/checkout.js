@@ -6,7 +6,7 @@ import { sleep } from 'k6';
 import { BASE_URL, CHECKOUT_PRODUCT_COUNT, CHECKOUT_STAGES, RUN_ID } from '../lib/config.js';
 import { freshSession, mintSessions } from '../lib/session.js';
 import { checkout, putCartLine, payAndAwait } from '../lib/shop.js';
-import { jsonBody, statusIs, summaryOutputs, trendStats } from '../lib/checks.js';
+import { jsonBody, rateLimitThreshold, statusIs, summaryOutputs, trendStats } from '../lib/checks.js';
 
 const MAX_VUS = Math.max(...CHECKOUT_STAGES.map((stage) => stage.target));
 
@@ -17,6 +17,7 @@ export const options = {
     },
     summaryTrendStats: trendStats,
     thresholds: {
+        ...rateLimitThreshold,
         'http_req_failed{load:shop}': ['rate<0.01'],
         'http_req_duration{op:checkout}': ['p(95)<1500'],
         order_paid: ['rate>0.98'],

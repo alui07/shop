@@ -31,6 +31,8 @@ patches:
                         key: SHOP_LOADTEST_TOKEN
                   - name: MANAGEMENT_TRACING_SAMPLING_PROBABILITY
                     value: '0.1'
+                  - name: SHOP_RATE_LIMIT_SCALE
+                    value: '1000'
   - target:
       kind: Deployment
       name: valkey
@@ -71,3 +73,39 @@ patches:
           port: 8090
           name: loadtest
           nodePort: 30090
+  # Every per-IP Envoy limit is raised: all k6 traffic shares one address. k8s-lint asserts each rule ends at 100000 or more, so a reordered rule list cannot slip through.
+  - target:
+      kind: BackendTrafficPolicy
+      name: shop
+    patch: |-
+      - op: replace
+        path: /spec/rateLimit/local/rules/0/limit/requests
+        value: 100000
+      - op: replace
+        path: /spec/rateLimit/local/rules/1/limit/requests
+        value: 100000
+      - op: replace
+        path: /spec/rateLimit/local/rules/2/limit/requests
+        value: 100000
+      - op: replace
+        path: /spec/rateLimit/local/rules/3/limit/requests
+        value: 100000
+      - op: replace
+        path: /spec/rateLimit/local/rules/4/limit/requests
+        value: 100000
+      - op: replace
+        path: /spec/rateLimit/local/rules/5/limit/requests
+        value: 100000
+      - op: replace
+        path: /spec/rateLimit/local/rules/6/limit/requests
+        value: 100000
+  - target:
+      kind: BackendTrafficPolicy
+      name: keycloak
+    patch: |-
+      - op: replace
+        path: /spec/rateLimit/local/rules/0/limit/requests
+        value: 100000
+      - op: replace
+        path: /spec/rateLimit/local/rules/1/limit/requests
+        value: 100000
