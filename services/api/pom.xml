@@ -101,6 +101,13 @@
         <dependency>
             <groupId>org.springframework.modulith</groupId>
             <artifactId>spring-modulith-starter-jdbc</artifactId>
+            <exclusions>
+                <!-- Its auto-configuration carries @EnableScheduling, which would run every @Scheduled job even with shop.jobs.enabled=false. -->
+                <exclusion>
+                    <groupId>org.springframework.modulith</groupId>
+                    <artifactId>spring-modulith-moments</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -212,6 +219,10 @@
                 <artifactId>maven-failsafe-plugin</artifactId>
                 <configuration>
                     <argLine>@{argLine} -javaagent:${org.mockito:mockito-core:jar}</argLine>
+                    <!-- About 20 cached contexts close at shutdown; the 30 s default kills the fork and can lose jacoco.exec. -->
+                    <forkedProcessExitTimeoutInSeconds>180</forkedProcessExitTimeoutInSeconds>
+                    <!-- Backstop for a hang the JUnit timeout cannot interrupt (context load, context close). -->
+                    <forkedProcessTimeoutInSeconds>1200</forkedProcessTimeoutInSeconds>
                     <!-- Exactly the variables the stacks set; TelemetryExportIT runs an OTLP stub on this port. -->
                     <environmentVariables>
                         <OTEL_EXPORTER_OTLP_ENDPOINT>http://localhost:14318</OTEL_EXPORTER_OTLP_ENDPOINT>

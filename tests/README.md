@@ -40,6 +40,7 @@ The public specs assert counts on the seeded catalog (60 active products, 10 kit
 - Coverage is measured over unit and integration tests together and enforced by the build: JaCoCo `check` fails `mvn verify`, Vitest `thresholds` fail `vitest run --coverage`. A drop below 100% fails `make test`.
 - Exactly two exclusions exist, both in the web app, approved by the owner on 2026-11-17: the machine-generated `src/routeTree.gen.ts` and the unmodified vendored shadcn primitives in `src/components/ui/`. Any other exclusion needs the owner's approval. If a primitive is edited it moves under the gate (`docs/adr/0002-testing-strategy.md`). The API has none.
 - All other production code is measured. `ApiApplication.main` is covered by a unit test that mocks `SpringApplication.run` statically; `main.tsx` is covered by tests that render into `#root`.
+- API tests have a default 2-minute JUnit timeout (`services/api/src/test/resources/junit-platform.properties`); when it fires JUnit prints a thread dump of every thread to the output and interrupts the test, which fails only if its thread responds to the interrupt. Context load and close are not timed; Failsafe kills a fork after 20 minutes.
 - End-to-end tests are not measured.
 
 Reports:

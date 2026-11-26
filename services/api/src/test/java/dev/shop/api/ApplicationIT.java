@@ -11,7 +11,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.info.BuildProperties;
 import org.springframework.boot.test.web.server.LocalManagementPort;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.context.ApplicationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor;
 
 @IntegrationTest
 class ApplicationIT {
@@ -27,6 +29,9 @@ class ApplicationIT {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private ApplicationContext context;
 
     @Test
     void appliesFlywayBaselineMigration() {
@@ -49,5 +54,11 @@ class ApplicationIT {
     void reportsReadinessAndLiveness() {
         assertThat(statusOf(managementPort, "/actuator/health/readiness")).isEqualTo(200);
         assertThat(statusOf(managementPort, "/actuator/health/liveness")).isEqualTo(200);
+    }
+
+    @Test
+    void leavesSchedulingOffWhenJobsAreDisabled() {
+        assertThat(context.getBeanNamesForType(ScheduledAnnotationBeanPostProcessor.class))
+                .isEmpty();
     }
 }

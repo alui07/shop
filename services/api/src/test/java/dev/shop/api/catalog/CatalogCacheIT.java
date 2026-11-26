@@ -5,18 +5,26 @@ import static org.assertj.core.api.Assertions.assertThat;
 import dev.shop.api.support.AdminClient;
 import dev.shop.api.support.Identity;
 import dev.shop.api.support.ShopIT;
+import io.lettuce.core.KillArgs;
+import io.lettuce.core.api.async.RedisAsyncCommands;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutionException;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.cache.CacheManager;
 import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.listener.ChannelTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
@@ -28,6 +36,7 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import tools.jackson.databind.JsonNode;
 
+@ExtendWith(OutputCaptureExtension.class)
 @TestPropertySource(properties = "spring.cache.type=caffeine")
 class CatalogCacheIT extends ShopIT {
 
@@ -217,7 +226,9 @@ class CatalogCacheIT extends ShopIT {
         try (ConfigurableApplicationContext other =
                 SecondApiContext.start(postgres, valkey, "maximumSize=2000,expireAfterWrite=30s,recordStats")) {
             CatalogService otherPod = other.getBean(CatalogService.class);
-            Awaitility.await().atMost(Duration.ofSeconds(10)).until(() -> subscribers() >= 2);
+            Awaitility.await()
+                    .atMost(Duration.ofSeconds(10))
+                    .until(() -> CatalogChannelSubscribers.count(redisTemplate) >= 2);
             assertThat(otherPod.product(LAMP).name()).isEqualTo("Desk Lamp");
 
             adminUpdatesLampInTransaction(false);
@@ -229,10 +240,45 @@ class CatalogCacheIT extends ShopIT {
         }
     }
 
-    /** Publishing returns the receiver count; a probe clears caches only, which is harmless. */
-    private long subscribers() {
-        Long receivers = redisTemplate.convertAndSend(CatalogCacheInvalidation.CHANNEL, "probe");
-        return receivers == null ? 0 : receivers;
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void aPodResubscribesAfterItsPubSubConnectionDrops(CapturedOutput output) {
+        try (ConfigurableApplicationContext other =
+                SecondApiContext.start(postgres, valkey, "maximumSize=2000,expireAfterWrite=30s,recordStats")) {
+            CatalogService otherPod = other.getBean(CatalogService.class);
+            Awaitility.await()
+                    .atMost(Duration.ofSeconds(10))
+                    .until(() -> CatalogChannelSubscribers.count(redisTemplate) >= 2);
+            int offset = output.getAll().length();
+
+            Long killed = redisTemplate.execute((RedisCallback<Long>) connection -> clientKillPubSub(connection));
+
+            assertThat(killed).isGreaterThanOrEqualTo(2);
+            Awaitility.await()
+                    .atMost(Duration.ofSeconds(10))
+                    .until(() -> CatalogChannelSubscribers.count(redisTemplate) >= 2);
+            assertThat(otherPod.product(LAMP).name()).isEqualTo("Desk Lamp");
+
+            adminUpdatesLampInTransaction(false);
+
+            Awaitility.await()
+                    .atMost(Duration.ofSeconds(1))
+                    .untilAsserted(
+                            () -> assertThat(otherPod.product(LAMP).name()).isEqualTo("Renamed Lamp"));
+            assertThat(output.getAll().substring(offset))
+                    .doesNotContain("Restarting subscription task")
+                    .doesNotContain("Subscription(s) recovered");
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Long clientKillPubSub(RedisConnection connection) {
+        var commands = (RedisAsyncCommands<byte[], byte[]>) connection.getNativeConnection();
+        try {
+            return commands.clientKill(KillArgs.Builder.typePubsub()).get();
+        } catch (InterruptedException | ExecutionException failure) {
+            throw new IllegalStateException(failure);
+        }
     }
 
     /** Collects what is published on the invalidation channel. */

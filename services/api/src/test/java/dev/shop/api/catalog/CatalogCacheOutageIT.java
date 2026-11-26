@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.TestPropertySource;
@@ -37,12 +38,18 @@ class CatalogCacheOutageIT extends ShopIT {
     @Autowired
     private GenericContainer<?> valkey;
 
+    @Autowired
+    private StringRedisTemplate redisTemplate;
+
     @Test
     @WithMockUser(roles = "ADMIN")
     void withValkeyDownTheWriteStillCommitsAndOtherPodsAreStaleForAtMostTheTimeToLive(CapturedOutput output) {
         try (ConfigurableApplicationContext other =
                 SecondApiContext.start(postgres, valkey, "maximumSize=2000,expireAfterWrite=15s")) {
             CatalogService otherPod = other.getBean(CatalogService.class);
+            Awaitility.await()
+                    .atMost(Duration.ofSeconds(10))
+                    .until(() -> CatalogChannelSubscribers.count(redisTemplate) >= 2);
             assertThat(otherPod.product(LAMP).name()).isEqualTo("Desk Lamp");
             valkey.stop();
 

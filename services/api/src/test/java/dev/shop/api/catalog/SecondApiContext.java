@@ -38,6 +38,7 @@ public final class SecondApiContext {
         };
         return new SpringApplicationBuilder(dev.shop.api.ApiApplication.class)
                 .web(WebApplicationType.SERVLET)
+                .registerShutdownHook(false)
                 .run(Stream.concat(Arrays.stream(arguments), Arrays.stream(extraArguments))
                         .toArray(String[]::new));
     }
