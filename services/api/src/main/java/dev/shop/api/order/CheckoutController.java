@@ -1,6 +1,7 @@
 package dev.shop.api.order;
 
 import dev.shop.api.customer.CurrentUser;
+import dev.shop.api.idempotency.IdempotencyKeys;
 import io.swagger.v3.oas.annotations.headers.Header;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -27,9 +28,6 @@ import org.springframework.web.bind.annotation.RestController;
 @SecurityRequirement(name = "sessionCookie")
 class CheckoutController {
 
-    static final String IDEMPOTENCY_KEY = "Idempotency-Key";
-    static final String IDEMPOTENCY_REPLAYED = "Idempotency-Replayed";
-
     private final CheckoutService service;
 
     CheckoutController(CheckoutService service) {
@@ -43,7 +41,7 @@ class CheckoutController {
                     "Created. A repeated key answers 201 again, with the order's current state and Idempotency-Replayed: true",
             headers = {
                 @Header(name = "Location", description = "Relative URL of the order"),
-                @Header(name = IDEMPOTENCY_REPLAYED, description = "true when the key had been used before")
+                @Header(name = IdempotencyKeys.REPLAYED_HEADER, description = "true when the key had been used before")
             },
             content = @Content(schema = @Schema(implementation = Order.class)))
     @ApiResponse(
@@ -77,7 +75,7 @@ class CheckoutController {
                             mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
                             schema = @Schema(implementation = ProblemDetail.class)))
     ResponseEntity<Order> checkout(
-            @RequestHeader(IDEMPOTENCY_KEY) UUID idempotencyKey,
+            @RequestHeader(IdempotencyKeys.HEADER) UUID idempotencyKey,
             @Valid @RequestBody CheckoutInput input,
             Authentication authentication) {
         CheckoutResult result = service.checkout(CurrentUser.of(authentication), idempotencyKey, input);
@@ -85,7 +83,7 @@ class CheckoutController {
                         URI.create("/api/orders/" + result.order().id()))
                 .cacheControl(CacheControl.noStore());
         if (result.replayed()) {
-            response.header(IDEMPOTENCY_REPLAYED, "true");
+            response.header(IdempotencyKeys.REPLAYED_HEADER, "true");
         }
         return response.body(result.order());
     }

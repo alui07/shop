@@ -5,6 +5,7 @@ import dev.shop.api.cart.CartRepository.LineRow;
 import dev.shop.api.catalog.pricing.Money;
 import dev.shop.api.catalog.pricing.PricedProduct;
 import dev.shop.api.catalog.pricing.ProductPricing;
+import dev.shop.api.idempotency.IdempotencyKeys;
 import dev.shop.api.inventory.StockLevel;
 import dev.shop.api.inventory.StockManagement;
 import java.time.Clock;
@@ -12,6 +13,7 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -30,22 +32,64 @@ class CartService {
     private final CartRepository repository;
     private final ProductPricing pricing;
     private final StockManagement stock;
+    private final IdempotencyKeys idempotency;
     private final Clock clock;
 
-    CartService(CartRepository repository, ProductPricing pricing, StockManagement stock, Clock clock) {
+    CartService(
+            CartRepository repository,
+            ProductPricing pricing,
+            StockManagement stock,
+            IdempotencyKeys idempotency,
+            Clock clock) {
         this.repository = repository;
         this.pricing = pricing;
         this.stock = stock;
+        this.idempotency = idempotency;
         this.clock = clock;
     }
 
     /** One snapshot, so the prices and the availability shown belong together. */
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     Cart get(String subject) {
+        return currentCart(subject);
+    }
+
+    private Cart currentCart(String subject) {
         return repository
                 .find(subject)
                 .map(cart -> view(cart.version(), repository.lines(cart.id())))
                 .orElseGet(() -> view(0, List.of()));
+    }
+
+    /**
+     * Adds to the line under the cart row's lock, so concurrent additions queue and the cap holds. The idempotency key
+     * is claimed first, as checkout does, so the lock order is the same: key row, then cart row. READ COMMITTED lets
+     * the lines read after the lock see every addition committed before it.
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    CartAddition addToLine(String subject, UUID key, String slug, int quantity) {
+        String requestHash = IdempotencyKeys.requestHash("POST /api/cart/lines/{slug}/additions", slug, quantity);
+        if (idempotency.claim(subject, key, requestHash).isPresent()) {
+            return new CartAddition(currentCart(subject), true);
+        }
+        PricedProduct product =
+                pricing.findBySlug(slug).filter(PricedProduct::active).orElseThrow(CartProblem::productNotFound);
+        OffsetDateTime now = OffsetDateTime.now(clock);
+        CartRow cart = repository.lockOrCreate(subject, now);
+        List<LineRow> lines = repository.lines(cart.id());
+        Optional<LineRow> current =
+                lines.stream().filter(line -> line.productId() == product.id()).findFirst();
+        int inCart = current.map(LineRow::quantity).orElse(0);
+        if (inCart + quantity > CartRules.MAX_QUANTITY) {
+            throw CartProblem.lineQuantityLimit(inCart);
+        }
+        if (current.isEmpty() && lines.size() >= CartRules.MAX_LINES) {
+            throw CartProblem.cartFull();
+        }
+        repository.upsertLine(cart.id(), product.id(), inCart + quantity, now);
+        repository.bumpVersion(cart.id(), now);
+        idempotency.complete(subject, key, 200, null);
+        return new CartAddition(view(cart.version() + 1, repository.lines(cart.id())), false);
     }
 
     @Transactional

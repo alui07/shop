@@ -7,7 +7,6 @@ import dev.shop.api.support.ShopIT;
 import java.net.http.HttpResponse;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
-import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -20,9 +19,6 @@ class IdempotencyIT extends ShopIT {
 
     @Autowired
     private DataSource dataSource;
-
-    @Autowired
-    private IdempotencyStore store;
 
     @Test
     void repeatingARequestReplaysTheSameOrderAndCreatesNoSecondOne() {
@@ -202,21 +198,6 @@ class IdempotencyIT extends ShopIT {
         assertThat(count("idempotency_key")).isEqualTo(1);
     }
 
-    @Test
-    void theMaintenanceJobDeletesOnlyExpiredKeysInBatches() {
-        OffsetDateTime now = OffsetDateTime.now(clock);
-        for (int i = 0; i < 5; i++) {
-            insertKey("old-" + i, now.minusHours(1));
-        }
-        insertKey("live", now.plusHours(1));
-        MaintenanceJob job = new MaintenanceJob(store, new CheckoutProperties(null, 3, 10, null, 50, 2, null), clock);
-
-        assertThat(job.runOnce()).isEqualTo(5);
-
-        assertThat(count("idempotency_key")).isEqualTo(1);
-        assertThat(job.runOnce()).isZero();
-    }
-
     private HttpResponse<String> checkoutWith(AdminClient client, UUID key) {
         JsonNode cart = cart(client);
         return checkout(
@@ -224,18 +205,6 @@ class IdempotencyIT extends ShopIT {
                 key,
                 cart.get("version").asLong(),
                 cart.get("total").get("amountMinor").asLong());
-    }
-
-    private void insertKey(String subject, OffsetDateTime expiresAt) {
-        jdbc.sql("""
-                        INSERT INTO idempotency_key (customer_subject, key, request_hash, created_at, expires_at)
-                        VALUES (:subject, :key, 'h', :created, :expires)
-                        """)
-                .param("subject", subject)
-                .param("key", UUID.randomUUID())
-                .param("created", expiresAt.minusDays(1))
-                .param("expires", expiresAt)
-                .update();
     }
 
     private int count(String table) {

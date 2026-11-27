@@ -1,4 +1,4 @@
-package dev.shop.api.order;
+package dev.shop.api.idempotency;
 
 import java.time.Clock;
 import java.time.OffsetDateTime;
@@ -9,26 +9,26 @@ import org.springframework.stereotype.Component;
 
 /** Deletes idempotency keys whose lifetime is over, in batches so no statement holds many locks. */
 @Component
-class MaintenanceJob {
+class IdempotencyMaintenanceJob {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(MaintenanceJob.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(IdempotencyMaintenanceJob.class);
 
-    private final IdempotencyStore idempotency;
-    private final CheckoutProperties properties;
+    private final IdempotencyStore store;
+    private final IdempotencyProperties properties;
     private final Clock clock;
 
-    MaintenanceJob(IdempotencyStore idempotency, CheckoutProperties properties, Clock clock) {
-        this.idempotency = idempotency;
+    IdempotencyMaintenanceJob(IdempotencyStore store, IdempotencyProperties properties, Clock clock) {
+        this.store = store;
         this.properties = properties;
         this.clock = clock;
     }
 
-    @Scheduled(fixedDelayString = "${shop.checkout.maintenance-interval:1h}")
+    @Scheduled(fixedDelayString = "${shop.idempotency.maintenance-interval:1h}")
     int runOnce() {
         int total = 0;
         int batch;
         do {
-            batch = idempotency.deleteExpired(OffsetDateTime.now(clock), properties.maintenanceBatchSize());
+            batch = store.deleteExpired(OffsetDateTime.now(clock), properties.maintenanceBatchSize());
             total += batch;
         } while (batch == properties.maintenanceBatchSize());
         if (total > 0) {

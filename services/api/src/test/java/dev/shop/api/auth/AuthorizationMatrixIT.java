@@ -38,6 +38,7 @@ class AuthorizationMatrixIT extends AuthIT {
                 Arguments.of("/api/admin/nothing", 401, 403, 404),
                 Arguments.of("/api/cart", 401, 200, 200),
                 Arguments.of("/api/cart/lines/desk-lamp", 401, 405, 405),
+                Arguments.of("/api/cart/lines/desk-lamp/additions", 401, 405, 405),
                 Arguments.of("/api/checkout", 401, 405, 405),
                 Arguments.of("/api/orders", 401, 200, 200),
                 Arguments.of("/api/orders?size=0", 401, 400, 400),
@@ -63,6 +64,7 @@ class AuthorizationMatrixIT extends AuthIT {
                 Arguments.of("POST", "/api/admin/audit", 401, 403, 405),
                 Arguments.of("PUT", "/api/cart/lines/desk-lamp", 401, 400, 400),
                 Arguments.of("DELETE", "/api/cart/lines/desk-lamp", 401, 200, 200),
+                Arguments.of("POST", "/api/cart/lines/desk-lamp/additions", 401, 400, 400),
                 Arguments.of("POST", "/api/cart", 401, 405, 405),
                 Arguments.of("POST", "/api/checkout", 401, 400, 400),
                 Arguments.of("POST", "/api/orders", 401, 405, 405),
@@ -75,7 +77,7 @@ class AuthorizationMatrixIT extends AuthIT {
     }
 
     /**
-     * The first five are answered with 400 by argument binding, which runs before the method guards, so their 403
+     * The first six are answered with 400 by argument binding, which runs before the method guards, so their 403
      * proves the URL rule itself; the method guards alone would also forbid the rest.
      */
     static Stream<Arguments> customerRoutes() {
@@ -85,6 +87,7 @@ class AuthorizationMatrixIT extends AuthIT {
                 Arguments.of("POST", "/api/orders/not-a-uuid/cancel"),
                 Arguments.of("POST", "/api/checkout"),
                 Arguments.of("PUT", "/api/cart/lines/desk-lamp"),
+                Arguments.of("POST", "/api/cart/lines/desk-lamp/additions"),
                 Arguments.of("GET", "/api/orders/" + UNKNOWN_ORDER),
                 Arguments.of("GET", "/api/orders"),
                 Arguments.of("GET", "/api/cart"),

@@ -3,7 +3,6 @@ package dev.shop.api.order;
 import dev.shop.api.web.Problems;
 import dev.shop.api.web.Problems.FieldProblem;
 import java.util.List;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.ErrorResponseException;
@@ -11,15 +10,8 @@ import org.springframework.web.ErrorResponseException;
 /** The refusals checkout and the order endpoints give. None echoes request input. */
 final class OrderProblem extends ErrorResponseException {
 
-    private final HttpHeaders headers = new HttpHeaders();
-
     private OrderProblem(HttpStatus status, ProblemDetail problem) {
         super(status, problem, null);
-    }
-
-    @Override
-    public HttpHeaders getHeaders() {
-        return headers;
     }
 
     static OrderProblem orderNotFound() {
@@ -55,23 +47,6 @@ final class OrderProblem extends ErrorResponseException {
 
     static OrderProblem orderState() {
         return conflict(Problems.ORDER_STATE, "The order is not awaiting payment", List.of());
-    }
-
-    static OrderProblem idempotencyInProgress() {
-        OrderProblem problem = conflict(
-                Problems.IDEMPOTENCY_IN_PROGRESS, "A request with this key is still being processed", List.of());
-        problem.headers.set(HttpHeaders.RETRY_AFTER, "1");
-        return problem;
-    }
-
-    static OrderProblem idempotencyKeyReused() {
-        return new OrderProblem(
-                HttpStatus.UNPROCESSABLE_CONTENT,
-                Problems.problem(
-                        HttpStatus.UNPROCESSABLE_CONTENT,
-                        Problems.IDEMPOTENCY_KEY_REUSED,
-                        "The key was used with a different request",
-                        List.of()));
     }
 
     private static OrderProblem conflict(String type, String detail, List<FieldProblem> errors) {

@@ -104,6 +104,7 @@ class OpenApiContractIT {
                         "POST /api/orders/{id}/payment",
                         "POST /api/orders/{id}/cancel",
                         "PUT /api/cart/lines/{slug}",
+                        "POST /api/cart/lines/{slug}/additions",
                         "DELETE /api/cart/lines/{slug}",
                         "POST /api/admin/products")
                 .noneMatch(operation -> operation.startsWith("GET "));

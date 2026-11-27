@@ -17,6 +17,15 @@ export function putCartLine(slug: string, quantity: number) {
   );
 }
 
+export function addToCartLine(slug: string, quantity: number, idempotencyKey: string) {
+  return sendRequest(
+    apiClient.POST('/api/cart/lines/{slug}/additions', {
+      params: { path: { slug }, header: { 'Idempotency-Key': idempotencyKey } },
+      body: { quantity },
+    }),
+  );
+}
+
 export function removeCartLine(slug: string) {
   return sendRequest(apiClient.DELETE('/api/cart/lines/{slug}', { params: { path: { slug } } }));
 }

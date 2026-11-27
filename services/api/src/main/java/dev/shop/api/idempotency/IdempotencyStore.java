@@ -1,4 +1,4 @@
-package dev.shop.api.order;
+package dev.shop.api.idempotency;
 
 import java.time.OffsetDateTime;
 import java.util.Optional;
@@ -7,10 +7,11 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+/** The {@code order_id} column holds the id of the resource the first request created; it is null for cart additions. */
 @Repository
 class IdempotencyStore {
 
-    record StoredKey(String requestHash, UUID orderId) {}
+    record StoredKey(String requestHash, UUID resourceId) {}
 
     private final JdbcClient jdbc;
 
@@ -52,12 +53,13 @@ class IdempotencyStore {
                 .optional();
     }
 
-    void complete(String subject, UUID key, UUID orderId) {
+    void complete(String subject, UUID key, int responseStatus, UUID resourceId) {
         jdbc.sql("""
-                        UPDATE idempotency_key SET response_status = 201, order_id = :order
+                        UPDATE idempotency_key SET response_status = :status, order_id = :resource
                         WHERE customer_subject = :subject AND key = :key
                         """)
-                .param("order", orderId)
+                .param("status", responseStatus)
+                .param("resource", resourceId)
                 .param("subject", subject)
                 .param("key", key)
                 .update();
