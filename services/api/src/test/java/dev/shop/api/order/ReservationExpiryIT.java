@@ -134,7 +134,6 @@ class ReservationExpiryIT extends ShopIT {
     }
 
     private static CheckoutProperties properties(int expiryBatchSize) {
-        return new CheckoutProperties(
-                Duration.ofMinutes(15), 3, 10, Duration.ofHours(24), expiryBatchSize, 1000, Duration.ofMinutes(30));
+        return new CheckoutProperties(Duration.ofMinutes(15), 3, 10, expiryBatchSize, Duration.ofMinutes(30));
     }
 }

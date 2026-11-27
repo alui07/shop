@@ -27,6 +27,7 @@ class RateLimitRuleTest {
                 Arguments.of("POST", "/api/orders/abc/cancel", RateLimitRule.ORDER_ACTIONS),
                 Arguments.of("PUT", "/api/cart/lines/desk-lamp", RateLimitRule.CART_WRITES),
                 Arguments.of("DELETE", "/api/cart/lines/desk-lamp", RateLimitRule.CART_WRITES),
+                Arguments.of("POST", "/api/cart/lines/x/additions", RateLimitRule.CART_WRITES),
                 Arguments.of("POST", "/api/cart", RateLimitRule.CART_WRITES),
                 Arguments.of("PATCH", "/api/cart/anything/else", RateLimitRule.CART_WRITES),
                 Arguments.of("POST", "/api/admin/products", RateLimitRule.ADMIN_WRITES),

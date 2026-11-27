@@ -32,6 +32,7 @@ class BodyLimitIT extends ShopIT {
     static Stream<Arguments> customerRoutesThatReadABody() {
         return Stream.of(
                 Arguments.of("PUT", "/api/cart/lines/desk-lamp", "{\"quantity\":1}"),
+                Arguments.of("POST", "/api/cart/lines/desk-lamp/additions", "{\"quantity\":1}"),
                 Arguments.of("POST", "/api/checkout", "{\"cartVersion\":0,\"expectedTotalMinor\":0}"));
     }
 
@@ -163,6 +164,7 @@ class BodyLimitIT extends ShopIT {
                 Arguments.of("POST", "/api/checkout"),
                 Arguments.of("POST", "/api/orders/" + UUID.randomUUID() + "/cancel"),
                 Arguments.of("PUT", "/api/cart/lines/desk-lamp"),
+                Arguments.of("POST", "/api/cart/lines/desk-lamp/additions"),
                 Arguments.of("DELETE", "/api/cart/lines/desk-lamp"));
     }
 

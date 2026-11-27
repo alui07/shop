@@ -6,14 +6,11 @@ import dev.shop.api.catalog.pricing.Money;
 import dev.shop.api.catalog.pricing.PricedProduct;
 import dev.shop.api.catalog.pricing.ProductPricing;
 import dev.shop.api.customer.CurrentUser;
+import dev.shop.api.idempotency.IdempotencyKeys;
+import dev.shop.api.idempotency.IdempotencyKeys.Completed;
 import dev.shop.api.inventory.reservations.InsufficientStockException;
 import dev.shop.api.inventory.reservations.ReservationLine;
 import dev.shop.api.inventory.reservations.StockReservations;
-import dev.shop.api.order.IdempotencyStore.StoredKey;
-import dev.shop.api.web.LockFailures;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -21,13 +18,12 @@ import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import org.springframework.dao.DataAccessException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -42,7 +38,7 @@ import org.springframework.transaction.annotation.Transactional;
 @PreAuthorize("hasRole('CUSTOMER')")
 class CheckoutService {
 
-    private final IdempotencyStore idempotency;
+    private final IdempotencyKeys idempotency;
     private final CartCheckout carts;
     private final ProductPricing pricing;
     private final StockReservations reservations;
@@ -51,7 +47,7 @@ class CheckoutService {
     private final Clock clock;
 
     CheckoutService(
-            IdempotencyStore idempotency,
+            IdempotencyKeys idempotency,
             CartCheckout carts,
             ProductPricing pricing,
             StockReservations reservations,
@@ -71,9 +67,11 @@ class CheckoutService {
     CheckoutResult checkout(CurrentUser user, UUID key, CheckoutInput input) {
         String subject = user.subject();
         Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
-        String requestHash = requestHash(input);
-        if (!claimKey(subject, key, requestHash, now)) {
-            return new CheckoutResult(replay(subject, key, requestHash), true);
+        String requestHash =
+                IdempotencyKeys.requestHash("POST /api/checkout", input.cartVersion(), input.expectedTotalMinor());
+        Optional<Completed> earlier = idempotency.claim(subject, key, requestHash);
+        if (earlier.isPresent()) {
+            return new CheckoutResult(replay(subject, earlier.get().resourceId()), true);
         }
         CartSnapshot cart = carts.lockForCheckout(subject)
                 .filter(snapshot -> !snapshot.lines().isEmpty() && snapshot.version() == input.cartVersion())
@@ -87,29 +85,12 @@ class CheckoutService {
         Order order = placeOrder(orderId, user, cart, products, total, now);
         reserve(orderId, cart, products);
         carts.clear(cart.cartId());
-        idempotency.complete(subject, key, orderId);
+        idempotency.complete(subject, key, 201, orderId);
         return new CheckoutResult(order, false);
     }
 
-    /** A second request with the same key waits on the first; if that outlasts lock_timeout, it is still in progress. */
-    private boolean claimKey(String subject, UUID key, String requestHash, Instant now) {
-        try {
-            return idempotency.claim(subject, key, requestHash, utc(now), utc(now.plus(properties.idempotencyTtl())));
-        } catch (DataAccessException failure) {
-            if (LockFailures.isLockTimeout(failure)) {
-                throw OrderProblem.idempotencyInProgress();
-            }
-            throw failure;
-        }
-    }
-
-    private Order replay(String subject, UUID key, String requestHash) {
-        StoredKey stored = idempotency.find(subject, key).orElseThrow();
-        if (!stored.requestHash().equals(requestHash)) {
-            throw OrderProblem.idempotencyKeyReused();
-        }
-        OrderRepository.OrderRow row =
-                orders.findOwned(stored.orderId(), subject).orElseThrow();
+    private Order replay(String subject, UUID orderId) {
+        OrderRepository.OrderRow row = orders.findOwned(orderId, subject).orElseThrow();
         return new Order(
                 row.id(),
                 row.status().presentedAt(row.expiresAt(), clock.instant()),
@@ -210,19 +191,5 @@ class CheckoutService {
 
     private static OffsetDateTime utc(Instant instant) {
         return instant.atOffset(ZoneOffset.UTC);
-    }
-
-    private static String requestHash(CheckoutInput input) {
-        String canonical = "POST /api/checkout\n" + input.cartVersion() + "\n" + input.expectedTotalMinor();
-        return digest(canonical, "SHA-256");
-    }
-
-    static String digest(String text, String algorithm) {
-        try {
-            byte[] digest = MessageDigest.getInstance(algorithm).digest(text.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(digest);
-        } catch (NoSuchAlgorithmException unknown) {
-            throw new IllegalArgumentException("Unknown digest algorithm", unknown);
-        }
     }
 }

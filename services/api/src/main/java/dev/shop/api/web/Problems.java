@@ -15,6 +15,7 @@ public final class Problems {
     public static final String PRICE_CHANGED = "tag:shop.dev,2026:price-changed";
     public static final String OUT_OF_STOCK = "tag:shop.dev,2026:out-of-stock";
     public static final String CART_FULL = "tag:shop.dev,2026:cart-full";
+    public static final String LINE_QUANTITY_LIMIT = "tag:shop.dev,2026:line-quantity-limit";
     public static final String TOO_MANY_PENDING_ORDERS = "tag:shop.dev,2026:too-many-pending-orders";
     public static final String RESERVATION_LIMIT = "tag:shop.dev,2026:reservation-limit";
     public static final String ORDER_STATE = "tag:shop.dev,2026:order-state";

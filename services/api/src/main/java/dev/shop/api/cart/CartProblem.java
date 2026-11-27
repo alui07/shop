@@ -26,4 +26,15 @@ final class CartProblem extends ErrorResponseException {
                         "The cart already has the most lines it can hold",
                         List.of()));
     }
+
+    static CartProblem lineQuantityLimit(int quantityInCart) {
+        ProblemDetail problem = Problems.problem(
+                HttpStatus.CONFLICT,
+                Problems.LINE_QUANTITY_LIMIT,
+                "The line would hold more than the most allowed",
+                List.of());
+        problem.setProperty("quantityInCart", quantityInCart);
+        problem.setProperty("maxQuantity", CartRules.MAX_QUANTITY);
+        return new CartProblem(HttpStatus.CONFLICT, problem);
+    }
 }

@@ -7,6 +7,7 @@ import dev.shop.api.catalog.NewProduct;
 import dev.shop.api.catalog.ProductAdministration;
 import dev.shop.api.catalog.ProductChanges;
 import dev.shop.api.catalog.pricing.ProductPricing;
+import dev.shop.api.idempotency.IdempotencyKeys;
 import dev.shop.api.inventory.StockManagement;
 import dev.shop.api.inventory.reservations.ReservationLine;
 import dev.shop.api.inventory.reservations.StockReservations;
@@ -42,6 +43,9 @@ class MandatoryTransactionIT {
 
     @Autowired
     private OrderPayments orderPayments;
+
+    @Autowired
+    private IdempotencyKeys idempotencyKeys;
 
     @Test
     void writesWithoutATransactionAreRefused() {
@@ -83,6 +87,15 @@ class MandatoryTransactionIT {
         assertThatThrownBy(() -> orderPayments.paymentFailed(order, order))
                 .isInstanceOf(IllegalTransactionStateException.class);
         assertThatThrownBy(() -> orderPayments.refunded(order, order, false))
+                .isInstanceOf(IllegalTransactionStateException.class);
+    }
+
+    @Test
+    void idempotencyKeysNeedTheCallersTransaction() {
+        UUID key = UUID.randomUUID();
+        assertThatThrownBy(() -> idempotencyKeys.claim("s", key, "h"))
+                .isInstanceOf(IllegalTransactionStateException.class);
+        assertThatThrownBy(() -> idempotencyKeys.complete("s", key, 200, null))
                 .isInstanceOf(IllegalTransactionStateException.class);
     }
 }

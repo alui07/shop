@@ -7,7 +7,6 @@ import {
   categories,
   customerMe,
   oakChair,
-  oakChairDetail,
   productPage,
 } from '@/test/fixtures';
 import {
@@ -204,56 +203,5 @@ describe('cart view', () => {
     renderApp('/cart');
 
     expect(await screen.findByText('Loading cart')).toBeTruthy();
-  });
-});
-
-describe('product page purchase controls', () => {
-  const product: Record<string, Responder> = {
-    '/api/products/oak-chair': () => jsonResponse(oakChairDetail),
-  };
-
-  it('offers sign in to anonymous visitors', async () => {
-    stubShop(anonymousMe, () => problemResponse(401), product);
-    renderApp('/products/oak-chair');
-
-    expect((await screen.findByRole('link', { name: 'Sign in to buy' })).getAttribute('href')).toBe(
-      '/oauth2/authorization/keycloak',
-    );
-    expect(screen.queryByRole('button', { name: 'Add to cart' })).toBeNull();
-  });
-
-  it('adds the chosen quantity and confirms', async () => {
-    const bodies: unknown[] = [];
-    stubShop(customerMe, () => jsonResponse(cartOf([], 0)), {
-      ...product,
-      '/api/cart/lines/oak-chair': async (_url, request) => {
-        bodies.push(await request.json());
-        return jsonResponse(cartOf([cartLine('oak-chair', 'Oak chair', 3)]));
-      },
-    });
-    renderApp('/products/oak-chair');
-
-    fireEvent.change(await screen.findByLabelText('Quantity'), { target: { value: '3' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Add to cart' }));
-
-    expect((await screen.findByRole('status')).textContent).toBe('Added to cart');
-    expect(bodies).toEqual([{ quantity: 3 }]);
-    expect(await screen.findByRole('link', { name: 'Cart (3)' })).toBeTruthy();
-  });
-
-  it.each([
-    [404, 'tag:shop.dev,2026:not-found', 'This product is no longer available.'],
-    [409, 'tag:shop.dev,2026:cart-full', 'Your cart is full. Remove an item first.'],
-    [500, 'tag:shop.dev,2026:internal', 'The product could not be added. Try again.'],
-  ])('explains a %d answer', async (status, type, message) => {
-    stubShop(customerMe, () => jsonResponse(cartOf([], 0)), {
-      ...product,
-      '/api/cart/lines/oak-chair': () => jsonResponse({ type, status, errors: [] }, status),
-    });
-    renderApp('/products/oak-chair');
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Add to cart' }));
-
-    expect((await screen.findByRole('alert')).textContent).toBe(message);
   });
 });

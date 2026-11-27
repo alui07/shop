@@ -153,8 +153,7 @@ class StockRaceIT extends ShopIT {
     }
 
     private static CheckoutProperties smallBatches() {
-        return new CheckoutProperties(
-                Duration.ofMinutes(15), 3, 10, Duration.ofHours(24), 5, 1000, Duration.ofMinutes(30));
+        return new CheckoutProperties(Duration.ofMinutes(15), 3, 10, 5, Duration.ofMinutes(30));
     }
 
     private List<String> seedCarts(int customers, long productId, int quantity) {

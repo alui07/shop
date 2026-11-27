@@ -56,6 +56,14 @@ public abstract class ShopIT extends AuthIT {
         return ok(client.put("/api/cart/lines/" + slug, "{\"quantity\":" + quantity + "}"));
     }
 
+    protected HttpResponse<String> addToLine(AdminClient client, String slug, int quantity, UUID key) {
+        return client.post(
+                "/api/cart/lines/" + slug + "/additions",
+                "{\"quantity\":" + quantity + "}",
+                "Idempotency-Key",
+                key.toString());
+    }
+
     protected JsonNode cart(AdminClient client) {
         return ok(client.get("/api/cart"));
     }

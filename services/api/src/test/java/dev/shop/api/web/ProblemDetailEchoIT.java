@@ -23,7 +23,8 @@ class ProblemDetailEchoIT extends ShopIT {
                 Arguments.of("GET", "/api/orders?page=" + PAYLOAD, null, "page"),
                 Arguments.of("GET", "/api/orders/" + PAYLOAD, null, "id"),
                 Arguments.of("POST", "/api/orders/" + PAYLOAD + "/cancel", null, "id"),
-                Arguments.of("POST", "/api/checkout", PAYLOAD, "Idempotency-Key"));
+                Arguments.of("POST", "/api/checkout", PAYLOAD, "Idempotency-Key"),
+                Arguments.of("POST", "/api/cart/lines/desk-lamp/additions", PAYLOAD, "Idempotency-Key"));
     }
 
     @ParameterizedTest(name = "{0} {1}")
@@ -34,7 +35,12 @@ class ProblemDetailEchoIT extends ShopIT {
 
         HttpResponse<String> response = method.equals("GET")
                 ? client.get(path)
-                : client.post(path, "{\"cartVersion\":0,\"expectedTotalMinor\":0}", headers);
+                : client.post(
+                        path,
+                        path.endsWith("/additions")
+                                ? "{\"quantity\":1}"
+                                : "{\"cartVersion\":0,\"expectedTotalMinor\":0}",
+                        headers);
 
         assertThat(response.statusCode()).isEqualTo(400);
         assertThat(response.body()).doesNotContain(PAYLOAD);
