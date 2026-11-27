@@ -18,14 +18,15 @@ fail() {
 marker=$(sed -n 's/.*LIMITS_FORGED_PATH_MARKER=\([^ ]*\).*/\1/p' "$k6_output" | tail -n 1)
 [ -n "$marker" ] || fail "no LIMITS_FORGED_PATH_MARKER line in $k6_output (did limits-test.js finish?)"
 
-# Envoy flushes its access log about once a second, so the last request can be missing right after k6 exits.
+# Envoy buffers file access logs and flushes every 10 s (--file-flush-interval-msec) or when 64 KiB fills, so the last
+# requests can appear up to 10 s after k6 exits; poll for 30 s. With a selector kubectl keeps only 10 lines unless --tail=-1.
 attempt=0
 while :; do
-  log=$(kubectl logs -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=shop -c envoy --since-time="$since" --max-log-requests=10) \
+  log=$(kubectl logs -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=shop -c envoy --since-time="$since" --tail=-1 --max-log-requests=10) \
     || fail "could not read the Envoy access log"
   printf '%s\n' "$log" | grep -Eq "$forged_request_pattern" && break
   attempt=$((attempt + 1))
-  [ "$attempt" -lt 10 ] || break
+  [ "$attempt" -lt 30 ] || break
   sleep 1
 done
 

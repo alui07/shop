@@ -22,6 +22,8 @@ Slice 0 delivered the toolchain. Before features arrive we want a test setup tha
 
 **Reports.** Coverage, the Playwright HTML report, traces and stack logs are written under gitignored folders (`build/reports/e2e`, `services/api/target/site/jacoco`, `apps/web/coverage`) and skipped by Trivy, Prettier and ESLint. CI uploads `build/reports/e2e` as an artifact when the job fails.
 
+**Scheduling and timeouts in API tests.** `web.SchedulingConfiguration` is the only place that enables scheduling; `shop.jobs.enabled=false` in `@IntegrationTest` therefore keeps every `@Scheduled` job out of test contexts, and `spring-modulith-moments` (whose auto-configuration carries `@EnableScheduling`) is excluded from the Modulith starter in `pom.xml` to keep it so; `ApplicationIT` asserts there is no `ScheduledAnnotationBeanPostProcessor`. A default 2-minute JUnit timeout with thread dump makes a hung test diagnosable, Failsafe kills a fork after 20 minutes, and CI uploads the Failsafe and Surefire reports when the job fails or is cancelled.
+
 ## Consequences
 
 `make ci` is slower: it now builds images before the browser tests and pulls the Playwright image. Contributors cannot merge code without tests for every branch. Out of scope for now: load tests, visual regression, mutation testing, and Kubernetes-level tests (slice 2).
